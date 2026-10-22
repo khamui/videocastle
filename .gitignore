@@ -1,0 +1,4 @@
+# Agent skill install artifacts
+.claude/
+.agents/
+skills-lock.json
