@@ -2,3 +2,21 @@
 .claude/
 .agents/
 skills-lock.json
+
+# Dependencies
+node_modules/
+
+# Build output
+web/dist/
+dist/
+
+# Runtime data (media, SQLite, session secret) — persisted via a volume in prod
+data/
+
+# Local env overrides
+.env
+.env.local
+
+# Logs / editor
+*.log
+.DS_Store
