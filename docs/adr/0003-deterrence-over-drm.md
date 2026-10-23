@@ -1,0 +1,3 @@
+# Download protection stops at deterrence, not DRM
+
+We protect a Video from casual downloading with segmented HLS (no single grabbable file), no download control in the player, and a disabled context menu; per-Video AES-128 segment encryption is available as a later opt-in. We deliberately do not implement DRM (Widevine/FairPlay): it requires commercial licensing and breaks self-hostability, and in a no-login model even AES-128 cannot stop a determined Viewer with devtools (who can read the key from their own session), nor can anything stop screen capture. This limitation is documented plainly rather than overpromised.

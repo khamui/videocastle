@@ -1,0 +1,3 @@
+# Optimize for human-maintainable code over AI-assisted velocity
+
+We use AI heavily while building videocastle, but the codebase must remain fully understandable and extendable by a human developer *without* an LLM in the loop — slower is acceptable, loss of ownership is not. This is why we favour explicit, boring, well-trodden technology (Fastify + a Vite/React SPA, Drizzle over "magic" ORMs, a monolith over framework abstractions like Next.js server components) and avoid clever abstractions whose behaviour can only be understood with AI assistance. The trade-off is giving up some out-of-the-box developer experience in exchange for a code we can always read, reason about, and own.

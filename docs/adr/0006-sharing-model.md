@@ -1,0 +1,5 @@
+# Sharing model: the shareable unit is a Video or a Folder, never the Library
+
+A Share Link points at either a single Video or a Folder (a one-level-deep group of Videos). The Operator's Library as a whole can never be shared. A Video belongs to at most one Folder — exclusive membership, not a multi-folder/playlist model — which keeps "move" and "delete" unambiguous. A direct Video link always reveals only that Video, never its Folder siblings, so sharing one video from a confidential Folder cannot leak the rest. Password and expiry attach per Share Link; unlocking a Folder cascades view access to its Videos for that visit, while a Video's own standalone link keeps independent protection.
+
+We chose this flat, filesystem-style model over nested Folders (rejected: needless depth) and over a tag/playlist model (rejected: ambiguous ownership and a harder privacy story). Deleting a Folder lets the Operator choose to either delete its Videos too or keep them by moving them to the Library root.

@@ -1,0 +1,3 @@
+# Access to a Video is gated only by an unguessable Share Link
+
+A Video has no Viewer accounts and no login: possession of its Share Link (a ~10-character random base62 slug) is the sole permission to watch, optionally narrowed by a per-Video password and/or expiry. Media is always served from the Operator's own server, never third-party cloud storage. We chose this over authenticated viewer access because the product's core use is pasting a link into a messenger, which an account wall would break. The cost is that a leaked link is a leaked Video — mitigated by the optional password and expiry, and by returning the same generic 404 for expired, deleted, and unknown slugs so the system never reveals whether a given link exists.
