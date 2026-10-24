@@ -16,6 +16,7 @@ import { createTranscodeWorker, type VideoWorker } from './videos/transcode-work
 import { registerVideoRoutes } from './videos/routes';
 import { registerWatchRoutes } from './videos/watch-routes';
 import { createTranscodingStatus } from './system/transcoding-status';
+import { registerRateLimiting } from './system/rate-limit';
 import { registerWebServer } from './web-server';
 
 declare module 'fastify' {
@@ -51,7 +52,11 @@ export interface AppDeps {
  * drive it either over the network or via `app.inject`.
  */
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
-  const app = Fastify({ logger: deps.logger ?? false });
+  // `trustProxy` so `request.ip` is the real client IP from `X-Forwarded-For`
+  // (set by the Operator's own TLS-terminating reverse proxy, the documented
+  // deploy shape — ADR-0004), which per-IP rate limiting keys on. Without it
+  // every request would look like it came from the proxy.
+  const app = Fastify({ logger: deps.logger ?? false, trustProxy: true });
 
   const operatorRepo = new OperatorRepo(deps.db);
   const sessionSecret = await operatorRepo.resolveSessionSecret(
@@ -66,6 +71,16 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     // returns one clear 413 (see src/videos/routes.ts) instead of a generic 500.
     limits: { fileSize: deps.config.maxUploadBytes, files: 1 },
     throwFileSizeLimit: false,
+  });
+
+  // Per-IP rate limiting on the public Viewer surface (general flood guard +
+  // stricter password-attempt guard). Registered before the routes so its
+  // onRequest hook gates them.
+  registerRateLimiting(app, {
+    clock: deps.clock,
+    windowMs: deps.config.rateLimitWindowMs,
+    generalMax: deps.config.rateLimitMax,
+    passwordMax: deps.config.rateLimitPasswordMax,
   });
 
   const session = createSessionManager({
