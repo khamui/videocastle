@@ -67,4 +67,13 @@ export class FolderRepo {
   async setExpiresAt(id: number, expiresAt: number | null): Promise<void> {
     await this.db.update(folders).set({ expiresAt }).where(eq(folders.id, id));
   }
+
+  /**
+   * Removes a Folder row. The caller must first clear every Video's reference to
+   * it — by deleting those Videos or moving them to the Library root — since a
+   * Video's `folderId` is a foreign key (deletion is enforced ON in the DB).
+   */
+  async delete(id: number): Promise<void> {
+    await this.db.delete(folders).where(eq(folders.id, id));
+  }
 }

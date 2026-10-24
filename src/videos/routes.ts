@@ -268,6 +268,49 @@ export async function registerVideoRoutes(
     },
   );
 
+  // Delete a Folder, with an explicit choice about its Videos (spec: Operator
+  // story 31, ADR-0006). The `videos` query param is required and has no
+  // default, so an accidental call can never silently destroy Videos:
+  //   - `delete` purges the Folder and every Video in it (media + Share Links).
+  //   - `keep`   removes the Folder only, moving its Videos to the Library root
+  //              (each Video and its own `/v/<slug>` link survive intact).
+  // The Dashboard presents both options before calling (story 31).
+  app.delete<{ Params: { slug: string }; Querystring: { videos?: string } }>(
+    '/api/folders/:slug',
+    requireOperator,
+    async (request, reply) => {
+      const folder = await folderRepo.findBySlug(request.params.slug);
+      if (!folder) return folderNotFound(reply, request.params.slug);
+
+      const mode = request.query.videos;
+      if (mode !== 'delete' && mode !== 'keep') {
+        return reply.code(400).send({
+          error: 'missing_videos_choice',
+          detail:
+            'The `videos` query param is required: "delete" to purge the Folder and its Videos, or "keep" to move them to the Library root.',
+        });
+      }
+
+      const contained = await repo.listByFolder(folder.id);
+      if (mode === 'delete') {
+        // Purge each Video first (row + media), so no row is left pointing at a
+        // vanished Folder and private footage is really gone (spec: ──delete──▶).
+        for (const video of contained) {
+          await repo.delete(video.id);
+          await store.removeVideo(video.id);
+        }
+      } else {
+        // Keep the Videos: detach them to the Library root before the Folder row
+        // goes (its id is a live foreign key), leaving each Share Link working.
+        for (const video of contained) {
+          await repo.setFolder(video.id, null);
+        }
+      }
+      await folderRepo.delete(folder.id);
+      return reply.code(204).send();
+    },
+  );
+
   /** Re-reads a Folder after a change and serializes it with its live Video count. */
   async function serializeFolderFresh(id: number): Promise<FolderView> {
     const folder = await folderRepo.findById(id);
