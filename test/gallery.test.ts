@@ -174,8 +174,8 @@ describe('a direct /v/<slug> link never reveals its Folder or siblings', () => {
   });
 });
 
-describe('a protected Video inside a Folder', () => {
-  it('keeps its poster sealed in the gallery and prompts before playing', async () => {
+describe('a Video with its own password inside an unprotected Folder', () => {
+  it('seals its tile poster but cascades open from the Folder; its /v/ link still prompts', async () => {
     const app = await signedIn();
     const folder = (await createFolder(app.app, app.jar, 'Trips')).json().folder;
     const slug = await uploadReady(app, app.jar, 'Locked clip');
@@ -187,33 +187,23 @@ describe('a protected Video inside a Folder', () => {
       payload: { password: 'open sesame' },
     });
 
-    // The tile still appears (it's Ready) but exposes no poster until unlocked.
+    // In the gallery the tile still appears (it's Ready) but exposes no poster —
+    // a protected Video keeps its frame sealed until it is actually opened.
     const gallery = await app.app.inject({ method: 'GET', url: `/api/watch/folder/${folder.slug}` });
     expect(gallery.json().folder.videos).toEqual([
       expect.objectContaining({ slug, protected: true, posterUrl: null }),
     ]);
 
-    // Opening it reports "protected" — the in-Folder view respects the Video's
-    // own password (the Folder→Video cascade is a later ticket).
-    const sealed = await app.app.inject({
-      method: 'GET',
-      url: `/api/watch/folder/${folder.slug}/${slug}`,
-    });
-    expect(sealed.json().watch).toEqual({ state: 'protected' });
-
-    // Unlock through the Video's own route, then it plays from within the Folder.
-    const unlock = await app.app.inject({
-      method: 'POST',
-      url: `/api/watch/${slug}/unlock`,
-      payload: { password: 'open sesame' },
-    });
-    expect(unlock.statusCode).toBe(200);
-    const grant = unlock.cookies.map((c) => `${c.name}=${c.value}`).join('; ');
+    // Opening it from within the (unprotected) Folder plays straight away — the
+    // Folder's access cascades, so there is no second prompt (spec: story 37).
     const opened = await app.app.inject({
       method: 'GET',
       url: `/api/watch/folder/${folder.slug}/${slug}`,
-      headers: { cookie: grant },
     });
     expect(opened.json().watch).toMatchObject({ state: 'ready', title: 'Locked clip' });
+
+    // …but the Video's own standalone link still enforces its password (story 39).
+    const direct = await app.app.inject({ method: 'GET', url: `/api/watch/${slug}` });
+    expect(direct.json().watch).toEqual({ state: 'protected' });
   });
 });

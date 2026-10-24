@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
-import { getFolderVideo, getWatch, unlockWatch, type WatchView } from './api';
+import {
+  getFolderVideo,
+  getWatch,
+  unlockFolder,
+  unlockWatch,
+  type WatchView,
+} from './api';
 
 type State =
   | { kind: 'loading' }
@@ -81,7 +87,20 @@ export function WatchPage(props: { slug: string; folderSlug?: string }) {
         case 'failed':
           return <TemporarilyUnavailable backHref={backHref} />;
         case 'protected':
-          return (
+          // In a Folder, access is gated by the Folder, not the Video — so a
+          // `protected` state here means the Folder is locked. Unlocking it
+          // cascades: re-fetching then yields the playable Video with no second
+          // prompt. A standalone link prompts for the Video's own password.
+          return folderSlug ? (
+            <FolderGate
+              slug={folderSlug}
+              backHref={backHref}
+              onUnlocked={async () => {
+                const view = await fetchView();
+                setState(view ? { kind: 'watch', view } : { kind: 'unavailable' });
+              }}
+            />
+          ) : (
             <PasswordPrompt
               slug={slug}
               backHref={backHref}
@@ -90,6 +109,59 @@ export function WatchPage(props: { slug: string; folderSlug?: string }) {
           );
       }
   }
+}
+
+/**
+ * The gate shown when a Video is opened from within a *protected* Folder: it
+ * unlocks the Folder (never the Video), after which the Folder access cascades
+ * to the Video and it plays. Mirrors {@link PasswordPrompt} but speaks to the
+ * Folder unlock endpoint.
+ */
+function FolderGate(props: {
+  slug: string;
+  backHref?: string;
+  onUnlocked: () => Promise<void>;
+}) {
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <WatchShell backHref={props.backHref}>
+      <form
+        className="watch-note watch-unlock"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          setError(null);
+          setBusy(true);
+          try {
+            const folder = await unlockFolder(props.slug, password);
+            if (folder) await props.onUnlocked();
+            else setError('That password is incorrect.');
+          } catch {
+            setError('Something went wrong. Please try again.');
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <h1>This folder is protected</h1>
+        <p className="muted">Enter the password to watch it.</p>
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          autoComplete="off"
+          autoFocus
+          required
+        />
+        {error && <p className="error">{error}</p>}
+        <button type="submit" disabled={busy || password.length === 0}>
+          {busy ? 'Unlocking…' : 'Unlock'}
+        </button>
+      </form>
+    </WatchShell>
+  );
 }
 
 /**

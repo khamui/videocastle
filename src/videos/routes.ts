@@ -149,6 +149,7 @@ export async function registerVideoRoutes(
 
   // The Operator's Folders, newest first, each with how many Videos it holds.
   app.get('/api/folders', requireOperator, async () => {
+    const now = clock.now();
     const [folders, videos] = await Promise.all([folderRepo.list(), repo.list()]);
     const counts = new Map<number, number>();
     for (const video of videos) {
@@ -157,7 +158,7 @@ export async function registerVideoRoutes(
       }
     }
     return {
-      folders: folders.map((folder) => serializeFolder(folder, counts.get(folder.id) ?? 0)),
+      folders: folders.map((folder) => serializeFolder(folder, counts.get(folder.id) ?? 0, now)),
     };
   });
 
@@ -178,7 +179,7 @@ export async function registerVideoRoutes(
         name,
         createdAt: clock.now(),
       });
-      return reply.code(201).send({ folder: serializeFolder(folder, 0) });
+      return reply.code(201).send({ folder: serializeFolder(folder, 0, clock.now()) });
     },
   );
 
@@ -194,11 +195,86 @@ export async function registerVideoRoutes(
       const now = clock.now();
       const videos = await repo.listByFolder(folder.id);
       return {
-        folder: serializeFolder(folder, videos.length),
+        folder: serializeFolder(folder, videos.length, now),
         videos: videos.map((video) => serializeVideo(video, now, folder.slug)),
       };
     },
   );
+
+  // Protect a Folder's `/f/` gallery with a password, or replace an existing
+  // one (spec: Operator story 29). Stored hashed (scrypt, same as a Video's);
+  // the plaintext is never persisted or echoed. A Viewer then unlocks the
+  // Folder once and its Videos cascade open (ADR-0002 second factor).
+  app.post<{ Params: { slug: string }; Body: { password?: unknown } }>(
+    '/api/folders/:slug/password',
+    requireOperator,
+    async (request, reply) => {
+      const folder = await folderRepo.findBySlug(request.params.slug);
+      if (!folder) return folderNotFound(reply, request.params.slug);
+
+      const password =
+        typeof request.body?.password === 'string' ? request.body.password.trim() : '';
+      if (password.length === 0) {
+        return reply.code(400).send({
+          error: 'missing_password',
+          detail: 'A non-empty password is required to protect a Folder.',
+        });
+      }
+
+      await folderRepo.setPasswordHash(folder.id, await hashPassword(password));
+      return reply.code(200).send({ folder: await serializeFolderFresh(folder.id) });
+    },
+  );
+
+  // Remove a Folder's password, making its gallery open again.
+  app.delete<{ Params: { slug: string } }>(
+    '/api/folders/:slug/password',
+    requireOperator,
+    async (request, reply) => {
+      const folder = await folderRepo.findBySlug(request.params.slug);
+      if (!folder) return folderNotFound(reply, request.params.slug);
+
+      await folderRepo.setPasswordHash(folder.id, null);
+      return reply.code(200).send({ folder: await serializeFolderFresh(folder.id) });
+    },
+  );
+
+  // Set, extend, clear, or re-enable a Folder gallery's expiry (spec: Operator
+  // story 29). Body carries `expiresAt` as epoch milliseconds, or null to never
+  // expire — mirroring a Video's expiry; the Clock decides expired/not-expired.
+  app.post<{ Params: { slug: string }; Body: { expiresAt?: unknown } }>(
+    '/api/folders/:slug/expiry',
+    requireOperator,
+    async (request, reply) => {
+      const folder = await folderRepo.findBySlug(request.params.slug);
+      if (!folder) return folderNotFound(reply, request.params.slug);
+
+      const raw = request.body?.expiresAt;
+      const expiresAt =
+        raw === null || raw === undefined
+          ? null
+          : typeof raw === 'number' && Number.isFinite(raw)
+            ? raw
+            : NaN;
+      if (Number.isNaN(expiresAt)) {
+        return reply.code(400).send({
+          error: 'invalid_expiry',
+          detail: 'expiresAt must be epoch milliseconds (a finite number) or null.',
+        });
+      }
+
+      await folderRepo.setExpiresAt(folder.id, expiresAt);
+      return reply.code(200).send({ folder: await serializeFolderFresh(folder.id) });
+    },
+  );
+
+  /** Re-reads a Folder after a change and serializes it with its live Video count. */
+  async function serializeFolderFresh(id: number): Promise<FolderView> {
+    const folder = await folderRepo.findById(id);
+    if (!folder) throw new Error('Folder vanished mid-request');
+    const videos = await repo.listByFolder(id);
+    return serializeFolder(folder, videos.length, clock.now());
+  }
 
   // Move a Video into a Folder, or back to the Library root. `folderSlug` names
   // the destination Folder; null moves it to the root. A Video belongs to at
@@ -461,21 +537,33 @@ export interface FolderView {
   slug: string;
   name: string;
   videoCount: number;
+  /** Whether a password gates the `/f/` gallery. The hash is never exposed. */
+  protected: boolean;
+  /** Gallery Share Link expiry (epoch ms), or null when it never expires. */
+  expiresAt: number | null;
+  /** Whether the gallery link has expired as of now (per the injected Clock). */
+  expired: boolean;
   shareUrl: string;
   createdAt: number;
 }
 
-function serializeFolder(folder: Folder, videoCount: number): FolderView {
+function serializeFolder(folder: Folder, videoCount: number, now: number): FolderView {
   return {
     slug: folder.slug,
     name: folder.name,
     videoCount,
+    protected: folder.passwordHash !== null,
+    expiresAt: folder.expiresAt,
+    expired: isExpired(folder, now),
     shareUrl: `/f/${folder.slug}`,
     createdAt: folder.createdAt,
   };
 }
 
-/** Whether a Video's Share Link has expired as of `now` (the injected Clock). */
-export function isExpired(video: Video, now: number): boolean {
-  return video.expiresAt !== null && now >= video.expiresAt;
+/**
+ * Whether a Share Link has expired as of `now` (the injected Clock). Works for
+ * anything carrying an optional expiry instant — a Video or a Folder alike.
+ */
+export function isExpired(link: { expiresAt: number | null }, now: number): boolean {
+  return link.expiresAt !== null && now >= link.expiresAt;
 }

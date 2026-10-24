@@ -97,6 +97,12 @@ export interface FolderSummary {
   slug: string;
   name: string;
   videoCount: number;
+  /** Whether a password gates the `/f/` gallery. */
+  protected: boolean;
+  /** Gallery link expiry (epoch ms), or null when it never expires. */
+  expiresAt: number | null;
+  /** Whether the gallery link has expired as of now (server-evaluated). */
+  expired: boolean;
   shareUrl: string;
   createdAt: number;
 }
@@ -141,6 +147,52 @@ export async function createFolder(name: string): Promise<FolderSummary> {
     body: JSON.stringify({ name }),
   });
   if (!res.ok) throw await operatorError(res, 'Could not create Folder');
+  const data = (await res.json()) as { folder: FolderSummary };
+  return data.folder;
+}
+
+/** Protects a Folder's gallery with a password (stored hashed server-side). */
+export async function setFolderPassword(
+  slug: string,
+  password: string,
+): Promise<FolderSummary> {
+  const res = await fetch(`/api/folders/${encodeURIComponent(slug)}/password`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ password }),
+  });
+  if (!res.ok) throw await operatorError(res, 'Could not set Folder password');
+  const data = (await res.json()) as { folder: FolderSummary };
+  return data.folder;
+}
+
+/** Clears a Folder's password, making its gallery open again. */
+export async function clearFolderPassword(slug: string): Promise<FolderSummary> {
+  const res = await fetch(`/api/folders/${encodeURIComponent(slug)}/password`, {
+    method: 'DELETE',
+    credentials: 'same-origin',
+  });
+  if (!res.ok) throw await operatorError(res, 'Could not clear Folder password');
+  const data = (await res.json()) as { folder: FolderSummary };
+  return data.folder;
+}
+
+/**
+ * Sets, extends, clears, or re-enables a Folder gallery's expiry. Pass epoch
+ * milliseconds to expire at that instant, or null to never expire.
+ */
+export async function setFolderExpiry(
+  slug: string,
+  expiresAt: number | null,
+): Promise<FolderSummary> {
+  const res = await fetch(`/api/folders/${encodeURIComponent(slug)}/expiry`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ expiresAt }),
+  });
+  if (!res.ok) throw await operatorError(res, 'Could not update Folder expiry');
   const data = (await res.json()) as { folder: FolderSummary };
   return data.folder;
 }
@@ -218,17 +270,17 @@ export async function getWatch(slug: string): Promise<WatchView | null> {
 }
 
 /**
- * A Folder as a Viewer sees it through its `/f/<slug>` link: the Folder's name
- * and its playable Videos as tiles. A protected Video keeps its poster sealed
- * (posterUrl null) until it's opened and unlocked. A link that does not resolve
- * (unknown/expired) is a null result — the generic "not available" case the
- * server hides behind one 404 (ADR-0002, no existence leak).
+ * A Folder as a Viewer sees it through its `/f/<slug>` link. A protected Folder
+ * not yet unlocked reveals nothing but that it needs a password; once open it
+ * carries its name and playable Videos as tiles. A protected Video keeps its
+ * poster sealed (posterUrl null) in the gallery until it's opened (its access
+ * then cascades from the Folder). A link that does not resolve (unknown/expired)
+ * is a null result — the generic "not available" the server hides behind one 404
+ * (ADR-0002, no existence leak).
  */
-export interface FolderView {
-  slug: string;
-  name: string;
-  videos: GalleryTile[];
-}
+export type FolderView =
+  | { protected: true }
+  | { protected: false; slug: string; name: string; videos: GalleryTile[] };
 
 export interface GalleryTile {
   slug: string;
@@ -246,6 +298,29 @@ export async function getFolder(slug: string): Promise<FolderView | null> {
   if (res.status === 404) return null;
   if (!res.ok) throw new Error('Could not load this folder');
   const data = (await res.json()) as { folder: FolderView };
+  return data.folder;
+}
+
+/**
+ * Unlocks a protected Folder with the Viewer's password. On success the server
+ * sets a Folder-scoped grant cookie (which then cascades to the Folder's Videos)
+ * and returns the now-open gallery; returns null for a wrong password or a link
+ * that doesn't resolve (a flat, opaque rejection — ADR-0002). The returned view
+ * is always the open variant on success.
+ */
+export async function unlockFolder(
+  slug: string,
+  password: string,
+): Promise<Extract<FolderView, { protected: false }> | null> {
+  const res = await fetch(`/api/watch/folder/${encodeURIComponent(slug)}/unlock`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ password }),
+  });
+  if (res.status === 401 || res.status === 404) return null;
+  if (!res.ok) throw new Error('Could not unlock this folder');
+  const data = (await res.json()) as { folder: Extract<FolderView, { protected: false }> };
   return data.folder;
 }
 

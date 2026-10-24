@@ -39,6 +39,20 @@ export const folders = sqliteTable('folders', {
   /** Unguessable base62 slug; the `/f/<slug>` Folder Share Link. */
   slug: text('slug').notNull().unique(),
   name: text('name').notNull(),
+  /**
+   * Optional Folder password, stored hashed (scrypt, same format as the Video
+   * and Operator credentials — see src/auth/password.ts). Null means the `/f/`
+   * gallery link is open; when set, a Viewer unlocks the Folder once and then
+   * plays any Video in it without re-prompting (the Folder→Video cascade).
+   */
+  passwordHash: text('password_hash'),
+  /**
+   * Optional Folder Share Link expiry, epoch milliseconds. Null means the
+   * gallery link never expires; when set, it is evaluated against the injected
+   * Clock and, once the instant has passed, the Folder is Expired and its `/f/`
+   * link returns the generic Viewer 404 (ADR-0002). Mirrors a Video's expiry.
+   */
+  expiresAt: integer('expires_at'),
   /** Epoch milliseconds, read from the injected Clock. */
   createdAt: integer('created_at').notNull(),
 });
