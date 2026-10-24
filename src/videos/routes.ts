@@ -34,7 +34,12 @@ export async function registerVideoRoutes(
   app.get('/api/status', requireOperator, async () => {
     const status = await transcoding.refresh();
     return {
-      transcoding: { available: status.available, version: status.version ?? null },
+      transcoding: {
+        available: status.available,
+        version: status.version ?? null,
+        // ADR-0007: tell the Operator the real reason it's unavailable.
+        error: status.error ?? null,
+      },
     };
   });
 
@@ -50,7 +55,10 @@ export async function registerVideoRoutes(
     if (!transcoding.current().available) {
       await transcoding.refresh();
       if (!transcoding.current().available) {
-        return reply.code(503).send({ error: 'transcoding_unavailable' });
+        return reply.code(503).send({
+          error: 'transcoding_unavailable',
+          detail: transcoding.current().error ?? undefined,
+        });
       }
     }
 
@@ -94,7 +102,11 @@ export async function registerVideoRoutes(
         await rm(store.videoDir(created.id), { recursive: true, force: true });
       }
       request.log.error(err, 'upload failed');
-      return reply.code(500).send({ error: 'upload_failed' });
+      // ADR-0007: the Operator owns the box — hand them the real cause.
+      return reply.code(500).send({
+        error: 'upload_failed',
+        detail: err instanceof Error ? err.message : String(err),
+      });
     }
 
     if (!created) {

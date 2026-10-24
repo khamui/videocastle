@@ -70,6 +70,8 @@ export interface VideoSummary {
 export interface TranscodingStatus {
   available: boolean;
   version: string | null;
+  /** The technical reason it's unavailable (ADR-0007), when it isn't. */
+  error: string | null;
 }
 
 /** Whether transcoding (ffmpeg) is usable, for the Dashboard's availability banner. */

@@ -268,7 +268,7 @@ describe('transcoding availability', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({
-      transcoding: { available: true, version: 'fake-1.0' },
+      transcoding: { available: true, version: 'fake-1.0', error: null },
     });
   });
 
@@ -288,7 +288,11 @@ describe('transcoding availability', () => {
     });
 
     expect(res.statusCode).toBe(503);
-    expect(res.json()).toEqual({ error: 'transcoding_unavailable' });
+    // ADR-0007: the 503 carries the technical reason for the Operator.
+    expect(res.json()).toMatchObject({
+      error: 'transcoding_unavailable',
+      detail: 'fake unavailable',
+    });
 
     // No Video row and no Source written.
     const list = await app.inject({ method: 'GET', url: '/api/videos', cookies: jar });
@@ -297,7 +301,7 @@ describe('transcoding availability', () => {
 
     const status = await app.inject({ method: 'GET', url: '/api/status', cookies: jar });
     expect(status.json()).toEqual({
-      transcoding: { available: false, version: null },
+      transcoding: { available: false, version: null, error: 'fake unavailable' },
     });
   });
 

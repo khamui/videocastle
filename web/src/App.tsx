@@ -121,6 +121,7 @@ function Dashboard(props: {
           the server, so uploads are paused. Install ffmpeg (or set
           <code>FFMPEG_PATH</code>) and it resumes automatically — no restart
           needed.
+          {status.error && <pre className="banner-detail">{status.error}</pre>}
         </div>
       )}
 
