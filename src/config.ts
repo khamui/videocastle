@@ -41,6 +41,12 @@ export interface Config {
   ffmpegPath: string;
   /** `ffprobe` binary to shell out to for probing Sources. */
   ffprobePath: string;
+  /** Length of the per-IP rate-limit window, in milliseconds. */
+  rateLimitWindowMs: number;
+  /** Max public viewer requests per IP per window (general flood guard). */
+  rateLimitMax: number;
+  /** Max password attempts (Video + Folder unlock) per IP per window (brute-force guard). */
+  rateLimitPasswordMax: number;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -57,6 +63,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     webDistDir: env.WEB_DIST_DIR || undefined,
     ffmpegPath: env.FFMPEG_PATH || 'ffmpeg',
     ffprobePath: env.FFPROBE_PATH || 'ffprobe',
+    // Generous general ceiling: HLS playback makes many segment requests, so the
+    // default (600/min/IP) stops floods without breaking normal viewing, while
+    // password attempts get a much tighter bucket to slow brute-forcing.
+    rateLimitWindowMs: parseIntOr(env.RATE_LIMIT_WINDOW_MS, 60_000),
+    rateLimitMax: parseIntOr(env.RATE_LIMIT_MAX, 600),
+    rateLimitPasswordMax: parseIntOr(env.RATE_LIMIT_PASSWORD_MAX, 10),
   };
 }
 
