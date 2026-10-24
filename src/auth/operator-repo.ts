@@ -53,6 +53,14 @@ export class OperatorRepo {
   }
 
   /**
+   * Overwrites an Operator's password hash (by id). Used by the password-reset
+   * CLI; the caller owns hashing. A no-op if the id doesn't exist.
+   */
+  async setPasswordHash(id: number, passwordHash: string): Promise<void> {
+    await this.db.update(operators).set({ passwordHash }).where(eq(operators.id, id));
+  }
+
+  /**
    * Resolves the session-signing secret. An env override always wins and is not
    * persisted (the env stays the source of truth). Otherwise the secret is read
    * from the database, or generated and persisted on first run so that sessions
