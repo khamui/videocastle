@@ -122,6 +122,51 @@ export async function registerVideoRoutes(
     const all = await repo.list();
     return { videos: all.map(serializeVideo) };
   });
+
+  // Retry a Failed Video. The Source was retained through the failure, so this
+  // simply re-queues transcoding (Failed → Processing) against the same file.
+  // Only a Failed Video is retryable; retrying anything else is refused with
+  // the Video's real state (ADR-0007: the real reason, not a genericised one).
+  app.post<{ Params: { slug: string } }>(
+    '/api/videos/:slug/retry',
+    requireOperator,
+    async (request, reply) => {
+      const video = await repo.findBySlug(request.params.slug);
+      if (!video) {
+        return reply.code(404).send({
+          error: 'video_not_found',
+          detail: `No Video with slug "${request.params.slug}".`,
+        });
+      }
+      if (video.state !== 'failed') {
+        return reply.code(409).send({
+          error: 'not_retryable',
+          detail: `Video "${video.slug}" is in state "${video.state}"; only a Failed Video can be retried.`,
+        });
+      }
+
+      // Don't re-queue into a transcoder that can't run — it would only
+      // re-fail. Retry is a deliberate, infrequent recovery action, so always
+      // re-probe (unlike the high-frequency upload gate): this both catches an
+      // ffmpeg that broke since boot and clears a stale "unavailable" the
+      // moment the Operator fixes it.
+      const status = await transcoding.refresh();
+      if (!status.available) {
+        return reply.code(503).send({
+          error: 'transcoding_unavailable',
+          detail: status.error ?? undefined,
+        });
+      }
+
+      // Read back the re-queued (Processing) Video before enqueuing, so the
+      // response reflects the retry regardless of how fast the worker then runs
+      // the job (a quick transcoder could otherwise flip the state first).
+      await repo.markProcessing(video.id);
+      const requeued = await repo.findById(video.id);
+      worker.enqueue(video.id);
+      return reply.code(200).send({ video: serializeVideo(requeued ?? video) });
+    },
+  );
 }
 
 /**
