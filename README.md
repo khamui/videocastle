@@ -34,8 +34,9 @@ process-compose up   # runs API (:8080) + SPA (:5173) together; q / Ctrl-C stops
 ```
 
 `process-compose up` supervises both dev servers as one group, so quitting it
-tears everything down — no servers left running on stray ports. To run them
-individually instead:
+tears everything down — no servers left running on stray ports. (process-compose's
+own UI is at http://localhost:8088; the dev shell moves it there so it doesn't
+clash with the app's :8080.) To run them individually instead:
 
 ```sh
 npm run dev:server   # API on http://localhost:8080

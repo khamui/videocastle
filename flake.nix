@@ -22,6 +22,13 @@
             pkgs.ffmpeg
             pkgs.process-compose
           ];
+
+          # process-compose's own admin/TUI server defaults to port 8080 — the
+          # same port the app's API binds — so the two collide. Move it to 8088
+          # (its web UI, if you open it, is then at http://localhost:8088).
+          shellHook = ''
+            export PC_PORT_NUM=8088
+          '';
         };
       });
     };
