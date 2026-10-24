@@ -488,3 +488,80 @@ button.ghost.danger:hover:not(:disabled) {
     transform: rotate(360deg);
   }
 }
+
+/* The back-to-gallery link shown when a Video was opened from within a Folder. */
+.watch-back {
+  width: 100%;
+  max-width: 960px;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.watch-back:hover {
+  color: var(--text);
+}
+
+/* --- Folder gallery (Viewer surface) --- */
+.gallery-title {
+  width: 100%;
+  max-width: 960px;
+  font-size: 1.5rem;
+  margin: 0;
+}
+
+.gallery-empty {
+  width: 100%;
+  max-width: 960px;
+}
+
+.gallery-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  max-width: 960px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 18px;
+}
+
+.gallery-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-decoration: none;
+  color: inherit;
+}
+
+.gallery-thumb {
+  aspect-ratio: 16 / 9;
+  position: relative;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background-color: #1b1f28;
+  background-size: cover;
+  background-position: center;
+  transition: border-color 0.15s ease;
+}
+
+.gallery-tile:hover .gallery-thumb {
+  border-color: var(--accent);
+}
+
+.gallery-lock {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  background: rgba(0, 0, 0, 0.72);
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 5px;
+}
+
+.gallery-tile-title {
+  font-size: 0.95rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

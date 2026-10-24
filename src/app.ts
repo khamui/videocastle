@@ -111,9 +111,11 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     transcoding,
   });
 
-  // The public Viewer surface (no session): watch a Video via its Share Link.
+  // The public Viewer surface (no session): watch a Video via its Share Link,
+  // or browse a Folder shared as a tiled gallery.
   await registerWatchRoutes(app, {
     repo: videoRepo,
+    folderRepo,
     store: mediaStore,
     clock: deps.clock,
     cookieSecure: deps.config.cookieSecure,
