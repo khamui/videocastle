@@ -319,3 +319,82 @@ button.ghost {
   color: var(--error);
   cursor: help;
 }
+
+/* --- Watch Page (Viewer surface) --- */
+.watch {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px;
+}
+
+.watch-wide {
+  justify-content: flex-start;
+  padding-top: 40px;
+}
+
+.watch-stage {
+  width: 100%;
+  max-width: 960px;
+  background: #000;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+}
+
+.watch-player {
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: #000;
+}
+
+.watch-title {
+  width: 100%;
+  max-width: 960px;
+  font-size: 1.3rem;
+  margin: 4px 0 0;
+}
+
+.watch-desc {
+  width: 100%;
+  max-width: 960px;
+  font-size: 0.92rem;
+}
+
+.watch-note {
+  width: 100%;
+  max-width: 420px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.watch-note h1 {
+  font-size: 1.3rem;
+}
+
+.watch-note p {
+  line-height: 1.5;
+}
+
+.spinner {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  animation: watch-spin 0.9s linear infinite;
+}
+
+@keyframes watch-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

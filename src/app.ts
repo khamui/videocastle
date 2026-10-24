@@ -13,6 +13,7 @@ import { MediaStore } from './media/media-store';
 import { VideoRepo } from './videos/video-repo';
 import { createTranscodeWorker, type VideoWorker } from './videos/transcode-worker';
 import { registerVideoRoutes } from './videos/routes';
+import { registerWatchRoutes } from './videos/watch-routes';
 import { createTranscodingStatus } from './system/transcoding-status';
 import { registerWebServer } from './web-server';
 
@@ -106,6 +107,9 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     clock: deps.clock,
     transcoding,
   });
+
+  // The public Viewer surface (no session): watch a Video via its Share Link.
+  await registerWatchRoutes(app, { repo: videoRepo, store: mediaStore });
 
   await registerWebServer(app, deps.config.webDistDir);
 
