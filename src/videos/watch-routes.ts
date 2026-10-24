@@ -8,12 +8,15 @@ import type {
 } from 'fastify';
 import type { Video } from '../db/schema';
 import { verifyPassword } from '../auth/password';
+import type { Clock } from '../ports/clock';
 import type { MediaStore } from '../media/media-store';
+import { isExpired } from './routes';
 import type { VideoRepo } from './video-repo';
 
 export interface WatchRouteOptions extends FastifyPluginOptions {
   repo: VideoRepo;
   store: MediaStore;
+  clock: Clock;
   /** Whether the unlock-grant cookie carries `Secure` (mirrors the session cookie). */
   cookieSecure: boolean;
 }
@@ -40,7 +43,24 @@ export async function registerWatchRoutes(
   app: FastifyInstance,
   options: WatchRouteOptions,
 ): Promise<void> {
-  const { repo, store, cookieSecure } = options;
+  const { repo, store, clock, cookieSecure } = options;
+
+  /**
+   * Resolves a slug to a *live* Video for the Viewer: unknown, deleted, and
+   * expired links all collapse to undefined, so they share the one generic 404
+   * (ADR-0002 — a Viewer can never tell which of the three a link is).
+   */
+  async function liveVideo(slug: string): Promise<Video | undefined> {
+    const video = await repo.findBySlug(slug);
+    if (!video || isExpired(video, clock.now())) return undefined;
+    return video;
+  }
+
+  /** A live Video, but only when it is Ready to play, else undefined. */
+  async function readyVideo(slug: string): Promise<Video | undefined> {
+    const video = await liveVideo(slug);
+    return video?.state === 'ready' ? video : undefined;
+  }
 
   const grantCookie = (slug: string): string => `vc_watch_${slug}`;
   const grantOptions = {
@@ -72,7 +92,7 @@ export async function registerWatchRoutes(
   // carries only what the "being prepared" screen needs. A protected Video
   // reveals nothing until unlocked — just that a password is required.
   app.get<{ Params: { slug: string } }>('/api/watch/:slug', async (request, reply) => {
-    const video = await repo.findBySlug(request.params.slug);
+    const video = await liveVideo(request.params.slug);
     if (!video) return notFound(reply);
     if (sealed(request, video)) return reply.send({ watch: { state: 'protected' as const } });
     // A Failed Video stays neutral for the Viewer: the link resolves, but
@@ -87,7 +107,7 @@ export async function registerWatchRoutes(
   app.get<{ Params: { slug: string; file: string } }>(
     '/api/watch/:slug/stream/:file',
     async (request, reply) => {
-      const video = await readyVideo(repo, request.params.slug);
+      const video = await readyVideo(request.params.slug);
       if (!video || sealed(request, video)) return notFound(reply);
 
       const { file } = request.params;
@@ -105,7 +125,7 @@ export async function registerWatchRoutes(
   app.get<{ Params: { slug: string } }>(
     '/api/watch/:slug/poster.jpg',
     async (request, reply) => {
-      const video = await readyVideo(repo, request.params.slug);
+      const video = await readyVideo(request.params.slug);
       if (!video || sealed(request, video)) return notFound(reply);
       return sendMedia(reply, store.posterPath(video.id), 'image/jpeg');
     },
@@ -119,7 +139,7 @@ export async function registerWatchRoutes(
   app.post<{ Params: { slug: string }; Body: { password?: unknown } }>(
     '/api/watch/:slug/unlock',
     async (request, reply) => {
-      const video = await repo.findBySlug(request.params.slug);
+      const video = await liveVideo(request.params.slug);
       if (!video) return notFound(reply);
 
       // No password set: nothing to unlock — just return the view as-is.
@@ -161,14 +181,6 @@ const HLS_SEGMENT_TYPE = 'video/mp2t';
 /** Matches the transcoder's segment naming (`seg_%03d.ts`), nothing else. */
 const SEGMENT_NAME = /^seg_\d+\.ts$/;
 
-/** Resolves a slug to its Video only when it is Ready to watch, else undefined. */
-async function readyVideo(
-  repo: VideoRepo,
-  slug: string,
-): Promise<Video | undefined> {
-  const video = await repo.findBySlug(slug);
-  return video?.state === 'ready' ? video : undefined;
-}
 
 /**
  * Streams a media file with its content type, or the generic 404 if it is
