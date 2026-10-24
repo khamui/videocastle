@@ -7,8 +7,11 @@ services:
       - '8080:8080'
     environment:
       DATA_DIR: /data
-      # SESSION_SECRET: change-me   # optional: override the auto-generated secret
-      # COOKIE_SECURE: 'true'       # set when a reverse proxy terminates TLS
+      # COOKIE_SECURE: 'true'            # set when a reverse proxy terminates TLS
+      # SESSION_SECRET: change-me        # optional: override the auto-generated secret
+      # MAX_UPLOAD_BYTES: '2147483648'   # largest accepted upload (bytes); ~2 GB default
+      # RATE_LIMIT_MAX: '600'            # per-IP viewer request ceiling per window
+      # RATE_LIMIT_PASSWORD_MAX: '10'    # per-IP password-attempt ceiling per window
     volumes:
       # Media, SQLite, and the session secret persist here across restarts.
       - videocastle-data:/data
