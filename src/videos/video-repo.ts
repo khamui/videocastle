@@ -1,0 +1,113 @@
+import { desc, eq } from 'drizzle-orm';
+import type { Database } from '../db/client';
+import { videos, type Video } from '../db/schema';
+
+/**
+ * Data access for Videos. Mirrors the style of {@link OperatorRepo}: Drizzle
+ * builds the SQL, this class exposes a small intention-revealing surface, and
+ * inserts are followed by a read-back (the sqlite-proxy driver is used without
+ * RETURNING, matching the existing Operator pattern).
+ */
+export class VideoRepo {
+  constructor(private readonly db: Database) {}
+
+  /**
+   * Inserts a freshly uploaded Video in the `processing` state and returns it.
+   * The caller supplies the unguessable slug and the upload timestamp.
+   */
+  async create(input: {
+    slug: string;
+    title: string;
+    description: string | null;
+    createdAt: number;
+  }): Promise<Video> {
+    await this.db.insert(videos).values({
+      slug: input.slug,
+      title: input.title,
+      description: input.description,
+      state: 'processing',
+      progress: 0,
+      createdAt: input.createdAt,
+    });
+    const created = await this.findBySlug(input.slug);
+    if (!created) {
+      throw new Error('Video creation did not persist');
+    }
+    return created;
+  }
+
+  /** All Videos, newest first. */
+  async list(): Promise<Video[]> {
+    return this.db.select().from(videos).orderBy(desc(videos.id));
+  }
+
+  async findBySlug(slug: string): Promise<Video | undefined> {
+    const rows = await this.db
+      .select()
+      .from(videos)
+      .where(eq(videos.slug, slug))
+      .limit(1);
+    return rows[0];
+  }
+
+  async findById(id: number): Promise<Video | undefined> {
+    const rows = await this.db
+      .select()
+      .from(videos)
+      .where(eq(videos.id, id))
+      .limit(1);
+    return rows[0];
+  }
+
+  /** Records transcoding progress (0–100) for a Video still Processing. */
+  async setProgress(id: number, progress: number): Promise<void> {
+    await this.db.update(videos).set({ progress }).where(eq(videos.id, id));
+  }
+
+  /**
+   * Marks a Video Ready: records its single Rendition and Poster, stamps the
+   * probed duration, and completes progress.
+   */
+  async markReady(
+    id: number,
+    result: {
+      playlistPath: string;
+      posterPath: string;
+      durationSeconds: number;
+    },
+  ): Promise<void> {
+    await this.db
+      .update(videos)
+      .set({
+        state: 'ready',
+        progress: 100,
+        playlistPath: result.playlistPath,
+        posterPath: result.posterPath,
+        durationSeconds: result.durationSeconds,
+      })
+      .where(eq(videos.id, id));
+  }
+
+  /**
+   * Marks a Video Failed after a transcode error, recording why so the Operator
+   * sees an actionable reason (retry lands in a later ticket).
+   */
+  async markFailed(
+    id: number,
+    failure: { reason: string; detail?: string },
+  ): Promise<void> {
+    await this.db
+      .update(videos)
+      .set({
+        state: 'failed',
+        failureReason: failure.reason,
+        failureDetail: failure.detail ?? null,
+      })
+      .where(eq(videos.id, id));
+  }
+
+  /** Removes a Video row — used to roll back a failed upload before it transcodes. */
+  async delete(id: number): Promise<void> {
+    await this.db.delete(videos).where(eq(videos.id, id));
+  }
+}

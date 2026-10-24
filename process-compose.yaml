@@ -1,0 +1,31 @@
+# Runs the dev stack as one supervised group, so starting and (crucially)
+# stopping are a single action — no orphaned servers left on stray ports.
+#
+#   process-compose up      # start API + SPA; press q / Ctrl-C to stop both
+#
+# Requires the dev shell (ffmpeg + Node 24 on PATH): `nix develop` or direnv.
+version: "0.5"
+
+processes:
+  api:
+    command: npm run dev:server
+    # The SPA's Vite proxy forwards /api to this server; gate `web` on this
+    # probe so Vite doesn't start (and log ECONNREFUSED) before the API listens.
+    readiness_probe:
+      http_get:
+        host: 127.0.0.1
+        port: 8080
+        path: /api/setup
+      initial_delay_seconds: 1
+      period_seconds: 1
+      failure_threshold: 30
+    availability:
+      restart: "no"
+
+  web:
+    command: npm run dev:web
+    depends_on:
+      api:
+        condition: process_healthy
+    availability:
+      restart: "no"

@@ -17,6 +17,9 @@ data/
 .env
 .env.local
 
+# direnv (the .envrc itself is committed; its generated state is not)
+.direnv/
+
 # Logs / editor
 *.log
 .DS_Store

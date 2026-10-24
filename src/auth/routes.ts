@@ -1,30 +1,17 @@
 import { randomBytes } from 'node:crypto';
-import type {
-  FastifyInstance,
-  FastifyPluginOptions,
-  FastifyReply,
-  FastifyRequest,
-  preHandlerHookHandler,
-} from 'fastify';
+import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
 import type { Clock } from '../ports/clock';
 import type { Operator } from '../db/schema';
 import { hashPassword, verifyPassword } from './password';
 import { OperatorAlreadyExistsError, type OperatorRepo } from './operator-repo';
-
-declare module 'fastify' {
-  interface FastifyRequest {
-    /** Set by the requireOperator guard once a request is authenticated. */
-    operator?: Operator;
-  }
-}
+import type { SessionManager } from './session';
 
 export interface AuthRouteOptions extends FastifyPluginOptions {
   repo: OperatorRepo;
   clock: Clock;
-  cookieSecure: boolean;
+  session: SessionManager;
 }
 
-const SESSION_COOKIE = 'vc_session';
 const MIN_PASSWORD_LENGTH = 8;
 
 interface Credentials {
@@ -36,55 +23,13 @@ export async function registerAuthRoutes(
   app: FastifyInstance,
   options: AuthRouteOptions,
 ): Promise<void> {
-  const { repo, clock, cookieSecure } = options;
+  const { repo, clock, session } = options;
+  const { startSession, clear, requireOperator } = session;
 
   // A throwaway hash verified on the unknown-username path so sign-in spends the
   // same scrypt time whether or not the username exists — closing the timing
   // oracle that would otherwise let valid usernames be probed.
   const decoyHash = await hashPassword(randomBytes(32).toString('hex'));
-
-  const cookieOptions = {
-    httpOnly: true,
-    sameSite: 'lax',
-    path: '/',
-    secure: cookieSecure,
-  } as const;
-
-  /** Issues the signed, httpOnly session cookie for an Operator. */
-  function startSession(reply: FastifyReply, operator: Operator): void {
-    reply.setCookie(SESSION_COOKIE, String(operator.id), {
-      ...cookieOptions,
-      signed: true,
-    });
-  }
-
-  /**
-   * Resolves the authenticated Operator from a signed session cookie, or
-   * undefined when the cookie is absent, unsigned/tampered, or no longer maps to
-   * the current Operator.
-   */
-  async function currentOperator(
-    request: FastifyRequest,
-  ): Promise<Operator | undefined> {
-    const raw = request.cookies[SESSION_COOKIE];
-    if (!raw) return undefined;
-
-    const unsigned = request.unsignCookie(raw);
-    if (!unsigned.valid || unsigned.value === null) return undefined;
-
-    const operator = await repo.get();
-    if (!operator || String(operator.id) !== unsigned.value) return undefined;
-    return operator;
-  }
-
-  /** preHandler that gates Operator-only routes, rejecting anyone unauthenticated. */
-  const requireOperator: preHandlerHookHandler = async (request, reply) => {
-    const operator = await currentOperator(request);
-    if (!operator) {
-      return reply.code(401).send({ error: 'unauthenticated' });
-    }
-    request.operator = operator;
-  };
 
   // Reports whether first-run setup is still needed, so the SPA can show the
   // setup screen on a fresh instance.
@@ -141,7 +86,7 @@ export async function registerAuthRoutes(
 
   // Sign out: clear the session cookie.
   app.delete('/api/session', async (_request, reply) => {
-    reply.clearCookie(SESSION_COOKIE, cookieOptions);
+    clear(reply);
     return reply.code(204).send();
   });
 

@@ -5,9 +5,11 @@ uploads a Video, it is transcoded to streamable HLS, and a Share Link is handed
 out to Viewers. The media stays on the Operator's own server; access is gated
 only by an unguessable link (optionally narrowed by a password and/or expiry).
 
-> **Status:** early. This is the walking skeleton — a running server, the single
-> Operator credential, first-run setup, and sign-in. Uploads, transcoding,
-> sharing, and Folders arrive in later milestones.
+> **Status:** early. The server, the single Operator credential, first-run setup
+> and sign-in are in place, and an Operator can now upload a Video — it streams to
+> disk, transcodes to HLS in the background, and appears in the Library with its
+> state and a copy-able Share Link. Viewer playback, sharing protections, and
+> Folders arrive in later milestones.
 
 ## Stack
 
@@ -20,13 +22,31 @@ TLS-terminating reverse proxy.
 
 ## Develop
 
-Requires Node.js 24+ (for the built-in `node:sqlite` module).
+Requires Node.js 24+ (for the built-in `node:sqlite` module) and `ffmpeg` on
+your PATH (the transcoder shells out to `ffmpeg`/`ffprobe`; without them uploads
+succeed but every transcode lands in Failed). The flake dev shell provides Node
+24, ffmpeg, and `process-compose`:
 
 ```sh
+nix develop          # enter the dev shell (or use direnv — see below)
 npm install
+process-compose up   # runs API (:8080) + SPA (:5173) together; q / Ctrl-C stops both
+```
+
+`process-compose up` supervises both dev servers as one group, so quitting it
+tears everything down — no servers left running on stray ports. (process-compose's
+own UI is at http://localhost:8088; the dev shell moves it there so it doesn't
+clash with the app's :8080.) To run them individually instead:
+
+```sh
 npm run dev:server   # API on http://localhost:8080
 npm run dev:web      # SPA on http://localhost:5173 (proxies /api to :8080)
 ```
+
+If you use [direnv](https://direnv.net) with `nix-direnv`, the committed
+`.envrc` (`use flake`) auto-loads the dev shell whenever you `cd` in — run
+`direnv allow` once. That keeps ffmpeg on PATH in every terminal, so the server
+never starts without it.
 
 Then open http://localhost:5173 and complete first-run setup.
 
@@ -54,8 +74,15 @@ restarts. Configure via environment variables — see `.env.example`.
 | `HOST`           | `0.0.0.0` | Listen address.                                                |
 | `PORT`           | `8080`    | Listen port.                                                   |
 | `DATA_DIR`       | `./data`  | Root for SQLite and media; mount a volume here in production.  |
+| `MEDIA_DIR`      | `$DATA_DIR/media` | Where Sources, Renditions, and Posters are written.   |
+| `MAX_UPLOAD_BYTES` | `2147483648` | Largest accepted upload (bytes); default ~2 GB.          |
+| `FFMPEG_PATH`    | `ffmpeg`  | ffmpeg binary used for transcoding.                            |
+| `FFPROBE_PATH`   | `ffprobe` | ffprobe binary used for probing Sources.                       |
 | `SESSION_SECRET` | _(auto)_  | Session-signing secret; generated and persisted on first run.  |
 | `COOKIE_SECURE`  | `false`   | Set `true` when a reverse proxy terminates TLS.                |
+
+Transcoding shells out to `ffmpeg` (bundled in the Docker image). For local
+`npm run dev:server`, install `ffmpeg` on your PATH.
 
 ## License
 
