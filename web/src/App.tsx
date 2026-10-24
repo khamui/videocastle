@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { WatchPage } from './WatchPage';
 import {
+  clearVideoPassword,
   deleteVideo,
   getMe,
   getNeedsSetup,
@@ -8,6 +9,7 @@ import {
   listVideos,
   retryVideo,
   setup,
+  setVideoPassword,
   signIn,
   signOut,
   uploadVideo,
@@ -258,6 +260,25 @@ function VideoCard(props: { video: VideoSummary; onChanged: () => void }) {
     }
   }
 
+  async function togglePassword(): Promise<void> {
+    setDeleteError(null);
+    try {
+      if (video.protected) {
+        if (!window.confirm(`Remove the password on “${video.title}”? Anyone with the link will be able to watch it.`)) {
+          return;
+        }
+        await clearVideoPassword(video.slug);
+      } else {
+        const password = window.prompt(`Set a password for “${video.title}”. Viewers will be prompted for it before playback.`);
+        if (password === null || password.trim().length === 0) return;
+        await setVideoPassword(video.slug, password.trim());
+      }
+      props.onChanged();
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Could not update password');
+    }
+  }
+
   async function remove(): Promise<void> {
     // Deletion is irreversible — purges the Source and Rendition and kills the
     // Share Link (spec: story 20). Confirm before it happens so it can't be an
@@ -307,6 +328,11 @@ function VideoCard(props: { video: VideoSummary; onChanged: () => void }) {
       <div className="video-body">
         <div className="video-title-row">
           <strong className="video-title">{video.title}</strong>
+          {video.protected && (
+            <span className="pill protected" title="Password-protected">
+              🔒
+            </span>
+          )}
           <span className={`pill ${video.state}`}>{video.state}</span>
         </div>
         {video.description && <p className="muted video-desc">{video.description}</p>}
@@ -334,6 +360,9 @@ function VideoCard(props: { video: VideoSummary; onChanged: () => void }) {
               {copied ? 'Copied!' : 'Copy link'}
             </button>
           )}
+          <button className="ghost password" onClick={() => void togglePassword()}>
+            {video.protected ? 'Remove password' : 'Set password'}
+          </button>
           <button
             className="ghost danger delete"
             onClick={() => void remove()}

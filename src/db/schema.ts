@@ -54,6 +54,12 @@ export const videos = sqliteTable('videos', {
   posterPath: text('poster_path'),
   /** Source duration in seconds, probed during transcoding; set when Ready. */
   durationSeconds: integer('duration_seconds'),
+  /**
+   * Optional per-Video password, stored hashed (scrypt, same format as the
+   * Operator credential — see src/auth/password.ts). Null means the Share Link
+   * is open; when set, a Viewer must supply the password before playback.
+   */
+  passwordHash: text('password_hash'),
   /** Short stable failure code (see TranscodeFailureReason); set when Failed. */
   failureReason: text('failure_reason'),
   /** Diagnostic detail for a failure (e.g. trimmed ffmpeg stderr); set when Failed. */

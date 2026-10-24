@@ -109,7 +109,11 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   });
 
   // The public Viewer surface (no session): watch a Video via its Share Link.
-  await registerWatchRoutes(app, { repo: videoRepo, store: mediaStore });
+  await registerWatchRoutes(app, {
+    repo: videoRepo,
+    store: mediaStore,
+    cookieSecure: deps.config.cookieSecure,
+  });
 
   await registerWebServer(app, deps.config.webDistDir);
 

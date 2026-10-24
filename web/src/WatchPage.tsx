@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
-import { getWatch, type WatchView } from './api';
+import { getWatch, unlockWatch, type WatchView } from './api';
 
 type State =
   | { kind: 'loading' }
@@ -66,8 +66,67 @@ export function WatchPage(props: { slug: string }) {
           return <Preparing title={state.view.title} />;
         case 'failed':
           return <TemporarilyUnavailable />;
+        case 'protected':
+          return (
+            <PasswordPrompt
+              slug={props.slug}
+              onUnlocked={(view) => setState({ kind: 'watch', view })}
+            />
+          );
       }
   }
+}
+
+/**
+ * The gate for a password-protected link (ADR-0002, second factor on top of the
+ * unguessable link). On the correct password the server mints a slug-scoped
+ * grant cookie and returns the real view; a wrong one is rejected opaquely —
+ * the page never reveals anything about the Video behind the prompt.
+ */
+function PasswordPrompt(props: {
+  slug: string;
+  onUnlocked: (view: WatchView) => void;
+}) {
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <WatchShell>
+      <form
+        className="watch-note watch-unlock"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          setError(null);
+          setBusy(true);
+          try {
+            const view = await unlockWatch(props.slug, password);
+            if (view) props.onUnlocked(view);
+            else setError('That password is incorrect.');
+          } catch {
+            setError('Something went wrong. Please try again.');
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <h1>This video is protected</h1>
+        <p className="muted">Enter the password to watch it.</p>
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          autoComplete="off"
+          autoFocus
+          required
+        />
+        {error && <p className="error">{error}</p>}
+        <button type="submit" disabled={busy || password.length === 0}>
+          {busy ? 'Unlocking…' : 'Unlock'}
+        </button>
+      </form>
+    </WatchShell>
+  );
 }
 
 function Player(props: { view: Extract<WatchView, { state: 'ready' }> }) {
