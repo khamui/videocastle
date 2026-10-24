@@ -15,9 +15,10 @@ export interface Config {
   /** Root directory for persisted media (Sources, Renditions, Posters). */
   mediaDir: string;
   /**
-   * Maximum accepted upload size in bytes. Enforced as the multipart file-size
-   * limit so oversized uploads are rejected rather than silently truncated.
-   * Richer cap/disk-full handling is a later ticket; this is the hard ceiling.
+   * Maximum accepted upload size in bytes (env `MAX_UPLOAD_BYTES`, default 2 GiB).
+   * Enforced both up front via Content-Length and as the multipart file-size
+   * limit, so an oversized upload is rejected with a clear 413 and leaves no
+   * partial Source behind (see src/videos/routes.ts).
    */
   maxUploadBytes: number;
   /**

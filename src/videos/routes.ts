@@ -22,13 +22,15 @@ export interface VideoRouteOptions extends FastifyPluginOptions {
   slugGenerator: SlugGenerator;
   clock: Clock;
   transcoding: TranscodingStatus;
+  /** Hard ceiling on a Source upload, in bytes (spec: configurable max upload size). */
+  maxUploadBytes: number;
 }
 
 export async function registerVideoRoutes(
   app: FastifyInstance,
   options: VideoRouteOptions,
 ): Promise<void> {
-  const { session, repo, folderRepo, worker, store, slugGenerator, clock, transcoding } =
+  const { session, repo, folderRepo, worker, store, slugGenerator, clock, transcoding, maxUploadBytes } =
     options;
   const requireOperator = { preHandler: session.requireOperator } as const;
 
@@ -72,6 +74,22 @@ export async function registerVideoRoutes(
       }
     }
 
+    // Reject an over-cap upload up front when the client declares its size, so a
+    // body we'd only reject anyway never streams to disk. Content-Length for a
+    // multipart body is an upper bound on the file (plus small field overhead),
+    // so `> cap` here is a safe early-out; a missing/understated length falls
+    // through to the mid-stream limit below (spec: early when present, else mid).
+    const declaredLength = request.headers['content-length'];
+    if (declaredLength !== undefined) {
+      const declared = Number(declaredLength);
+      if (Number.isFinite(declared) && declared > maxUploadBytes) {
+        return reply.code(413).send({
+          error: 'upload_too_large',
+          detail: `Upload is ${declared} bytes, over the ${maxUploadBytes}-byte maximum.`,
+        });
+      }
+    }
+
     let title: string | undefined;
     let description: string | null = null;
     let created: Video | undefined;
@@ -101,12 +119,25 @@ export async function registerVideoRoutes(
         });
         await store.ensureVideoDir(created.id);
         await pipeline(part.file, createWriteStream(store.sourcePath(created.id)));
+
+        // The file exceeded the cap without an honest Content-Length: it was
+        // truncated at the limit mid-stream. Roll back the partial Source + row
+        // and return the same clear 413 as the early check — no junk left behind.
+        if (part.file.truncated) {
+          await repo.delete(created.id);
+          await store.removeVideo(created.id);
+          return reply.code(413).send({
+            error: 'upload_too_large',
+            detail: `Upload exceeds the ${maxUploadBytes}-byte maximum.`,
+          });
+        }
         break; // one file per upload; ignore any trailing parts
       }
     } catch (err) {
-      // The upload failed mid-stream: roll back so a half-written Source and its
-      // orphaned row don't linger. (Richer cap/disk-full handling is a later
-      // ticket; this is the minimum that keeps a failed upload from leaving junk.)
+      // The upload failed mid-stream (e.g. the disk filled — ENOSPC): roll back
+      // so a half-written Source and its orphaned row don't linger, then hand
+      // the Operator the real cause (ADR-0007). The cap-exceeded case is handled
+      // above as a clean 413; this catch covers genuine write failures.
       if (created) {
         await repo.delete(created.id);
         await store.removeVideo(created.id);
