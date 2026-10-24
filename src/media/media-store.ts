@@ -28,6 +28,26 @@ export class MediaStore {
     return join(this.videoDir(id), 'source');
   }
 
+  /** Absolute path to a Video's HLS Rendition directory (playlist + segments). */
+  renditionDir(id: number): string {
+    return join(this.videoDir(id), 'rendition');
+  }
+
+  /** Absolute path to a Video's HLS playlist. */
+  playlistPath(id: number): string {
+    return join(this.renditionDir(id), 'index.m3u8');
+  }
+
+  /** Absolute path to a Video's Poster still. */
+  posterPath(id: number): string {
+    return join(this.videoDir(id), 'poster.jpg');
+  }
+
+  /** Absolute path to a named HLS segment (e.g. `seg_000.ts`) within the Rendition. */
+  segmentPath(id: number, name: string): string {
+    return join(this.renditionDir(id), name);
+  }
+
   /** Creates a Video's media directory if it does not already exist. */
   async ensureVideoDir(id: number): Promise<void> {
     await mkdir(this.videoDir(id), { recursive: true });

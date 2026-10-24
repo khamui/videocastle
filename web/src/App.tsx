@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { WatchPage } from './WatchPage';
 import {
   getMe,
   getNeedsSetup,
@@ -19,7 +20,23 @@ type Screen =
   | { kind: 'sign-in' }
   | { kind: 'dashboard'; operator: OperatorSummary };
 
+/** `/v/<slug>` is the public Viewer Share Link; everything else is the Dashboard. */
+function watchSlug(pathname: string): string | null {
+  const match = /^\/v\/([^/]+)\/?$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]!) : null;
+}
+
 export function App() {
+  // The Watch Page is a distinct, account-free surface (ADR-0002): resolve it
+  // straight from the URL before the Operator setup/sign-in flow runs at all.
+  const slug = watchSlug(window.location.pathname);
+  if (slug) return <WatchPage slug={slug} />;
+
+  return <OperatorApp />;
+}
+
+/** The Operator-facing app: first-run setup, sign-in, then the Library. */
+function OperatorApp() {
   const [screen, setScreen] = useState<Screen>({ kind: 'loading' });
 
   useEffect(() => {

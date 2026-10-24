@@ -91,6 +91,46 @@ export async function listVideos(): Promise<VideoSummary[]> {
 }
 
 /**
+ * A Video as a Viewer sees it through its Share Link. Mirrors the server's
+ * WatchView: a Ready Video carries its playback URLs; a Processing one carries
+ * only what the "being prepared" screen needs; a Failed one is neutral, with no
+ * diagnostics (GLOSSARY: Failed → "temporarily unavailable"). A link that does
+ * not resolve at all (unknown/deleted) is instead a null result — the generic
+ * "not available" case the server hides behind one 404.
+ */
+export type WatchView =
+  | {
+      state: 'ready';
+      slug: string;
+      title: string;
+      description: string | null;
+      posterUrl: string;
+      playlistUrl: string;
+    }
+  | {
+      state: 'processing';
+      slug: string;
+      title: string;
+      description: string | null;
+    }
+  | { state: 'failed' };
+
+/**
+ * Loads the watch view for a Share Link, or null when the link does not resolve
+ * (the server returns one generic 404 for unknown/deleted — no existence leak,
+ * so the Watch Page shows the same "not available" for all of them).
+ */
+export async function getWatch(slug: string): Promise<WatchView | null> {
+  const res = await fetch(`/api/watch/${encodeURIComponent(slug)}`, {
+    credentials: 'same-origin',
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error('Could not load this video');
+  const data = (await res.json()) as { watch: WatchView };
+  return data.watch;
+}
+
+/**
  * Uploads a Video. The title and description fields are appended before the
  * file so the server knows them by the time the file stream arrives. Resolves
  * with the created (Processing) Video.
