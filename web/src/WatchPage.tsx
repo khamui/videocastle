@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
-import { getWatch, unlockWatch, type WatchView } from './api';
+import { getFolderVideo, getWatch, unlockWatch, type WatchView } from './api';
 
 type State =
   | { kind: 'loading' }
@@ -8,25 +8,37 @@ type State =
   | { kind: 'watch'; view: WatchView };
 
 /**
- * The Viewer's Watch Page for a `/v/<slug>` Share Link. No account, no login
- * (ADR-0002). A Ready Video plays its HLS Rendition behind the Poster; a still-
- * Processing Video shows a "being prepared" screen and quietly re-checks until
- * it is Ready; anything else collapses to one generic "not available" (the
+ * The Viewer's Watch Page. No account, no login (ADR-0002). Serves two Share
+ * Link shapes: a standalone `/v/<slug>` link, and a Video opened from within its
+ * Folder (`/f/<folderSlug>/<slug>`), which additionally shows a back-to-gallery
+ * link. In both, a Ready Video plays its HLS Rendition behind the Poster; a
+ * still-Processing Video shows a "being prepared" screen and quietly re-checks
+ * until it is Ready; anything else collapses to one generic "not available" (the
  * server never says which link existed).
+ *
+ * The in-Folder view differs only in where its view model is fetched from (the
+ * server also confirms the Video is in that Folder) and the back link — playback,
+ * poster, and unlock all run through the Video's own `/api/watch/:slug/*` routes,
+ * so a direct `/v/<slug>` link never reveals a Folder or its siblings.
  *
  * Download deterrence (ADR-0003), not prevention: segmented HLS (never a single
  * grabbable file), no download control, and a disabled context menu over the
  * player. None of this stops a determined capture, by design.
  */
-export function WatchPage(props: { slug: string }) {
+export function WatchPage(props: { slug: string; folderSlug?: string }) {
   const [state, setState] = useState<State>({ kind: 'loading' });
+
+  const { slug, folderSlug } = props;
+  const backHref = folderSlug ? `/f/${encodeURIComponent(folderSlug)}` : undefined;
+  const fetchView = (): Promise<WatchView | null> =>
+    folderSlug ? getFolderVideo(folderSlug, slug) : getWatch(slug);
 
   useEffect(() => {
     let cancelled = false;
 
     async function load(): Promise<void> {
       try {
-        const view = await getWatch(props.slug);
+        const view = await fetchView();
         if (cancelled) return;
         setState(view ? { kind: 'watch', view } : { kind: 'unavailable' });
       } catch {
@@ -38,7 +50,8 @@ export function WatchPage(props: { slug: string }) {
     return () => {
       cancelled = true;
     };
-  }, [props.slug]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug, folderSlug]);
 
   // While the Video is still Processing, re-check so it starts playing on its
   // own once the worker finishes — the Viewer never has to reload the page.
@@ -46,30 +59,32 @@ export function WatchPage(props: { slug: string }) {
   useEffect(() => {
     if (!processing) return;
     const id = setInterval(() => {
-      void getWatch(props.slug).then((view) => {
+      void fetchView().then((view) => {
         if (view) setState({ kind: 'watch', view });
       });
     }, 5000);
     return () => clearInterval(id);
-  }, [processing, props.slug]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [processing, slug, folderSlug]);
 
   switch (state.kind) {
     case 'loading':
-      return <WatchShell>Loading…</WatchShell>;
+      return <WatchShell backHref={backHref}>Loading…</WatchShell>;
     case 'unavailable':
-      return <Unavailable />;
+      return <Unavailable backHref={backHref} />;
     case 'watch':
       switch (state.view.state) {
         case 'ready':
-          return <Player view={state.view} />;
+          return <Player view={state.view} backHref={backHref} />;
         case 'processing':
-          return <Preparing title={state.view.title} />;
+          return <Preparing title={state.view.title} backHref={backHref} />;
         case 'failed':
-          return <TemporarilyUnavailable />;
+          return <TemporarilyUnavailable backHref={backHref} />;
         case 'protected':
           return (
             <PasswordPrompt
-              slug={props.slug}
+              slug={slug}
+              backHref={backHref}
               onUnlocked={(view) => setState({ kind: 'watch', view })}
             />
           );
@@ -85,6 +100,7 @@ export function WatchPage(props: { slug: string }) {
  */
 function PasswordPrompt(props: {
   slug: string;
+  backHref?: string;
   onUnlocked: (view: WatchView) => void;
 }) {
   const [password, setPassword] = useState('');
@@ -92,7 +108,7 @@ function PasswordPrompt(props: {
   const [error, setError] = useState<string | null>(null);
 
   return (
-    <WatchShell>
+    <WatchShell backHref={props.backHref}>
       <form
         className="watch-note watch-unlock"
         onSubmit={async (e) => {
@@ -129,7 +145,10 @@ function PasswordPrompt(props: {
   );
 }
 
-function Player(props: { view: Extract<WatchView, { state: 'ready' }> }) {
+function Player(props: {
+  view: Extract<WatchView, { state: 'ready' }>;
+  backHref?: string;
+}) {
   const { view } = props;
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -153,7 +172,7 @@ function Player(props: { view: Extract<WatchView, { state: 'ready' }> }) {
   }, [view.playlistUrl]);
 
   return (
-    <WatchShell wide>
+    <WatchShell wide backHref={props.backHref}>
       <div className="watch-stage">
         <video
           ref={videoRef}
@@ -176,9 +195,9 @@ function Player(props: { view: Extract<WatchView, { state: 'ready' }> }) {
   );
 }
 
-function Preparing(props: { title: string }) {
+function Preparing(props: { title: string; backHref?: string }) {
   return (
-    <WatchShell>
+    <WatchShell backHref={props.backHref}>
       <div className="watch-note">
         <div className="spinner" aria-hidden />
         <h1>{props.title}</h1>
@@ -191,9 +210,9 @@ function Preparing(props: { title: string }) {
   );
 }
 
-function Unavailable() {
+function Unavailable(props: { backHref?: string }) {
   return (
-    <WatchShell>
+    <WatchShell backHref={props.backHref}>
       <div className="watch-note">
         <h1>Video not available</h1>
         <p className="muted">
@@ -206,9 +225,9 @@ function Unavailable() {
 }
 
 /** A Video that resolved but whose transcode errored (GLOSSARY: Failed). */
-function TemporarilyUnavailable() {
+function TemporarilyUnavailable(props: { backHref?: string }) {
   return (
-    <WatchShell>
+    <WatchShell backHref={props.backHref}>
       <div className="watch-note">
         <h1>Temporarily unavailable</h1>
         <p className="muted">
@@ -219,8 +238,20 @@ function TemporarilyUnavailable() {
   );
 }
 
-function WatchShell(props: { children: React.ReactNode; wide?: boolean }) {
+function WatchShell(props: {
+  children: React.ReactNode;
+  wide?: boolean;
+  /** When set, a back-to-gallery link (the Video was opened from within a Folder). */
+  backHref?: string;
+}) {
   return (
-    <main className={`watch${props.wide ? ' watch-wide' : ''}`}>{props.children}</main>
+    <main className={`watch${props.wide ? ' watch-wide' : ''}`}>
+      {props.backHref && (
+        <a className="watch-back" href={props.backHref}>
+          ← Back to gallery
+        </a>
+      )}
+      {props.children}
+    </main>
   );
 }

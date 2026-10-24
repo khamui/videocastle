@@ -6,15 +6,17 @@ import type {
   FastifyReply,
   FastifyRequest,
 } from 'fastify';
-import type { Video } from '../db/schema';
+import type { Folder, Video } from '../db/schema';
 import { verifyPassword } from '../auth/password';
 import type { Clock } from '../ports/clock';
 import type { MediaStore } from '../media/media-store';
 import { isExpired } from './routes';
 import type { VideoRepo } from './video-repo';
+import type { FolderRepo } from './folder-repo';
 
 export interface WatchRouteOptions extends FastifyPluginOptions {
   repo: VideoRepo;
+  folderRepo: FolderRepo;
   store: MediaStore;
   clock: Clock;
   /** Whether the unlock-grant cookie carries `Secure` (mirrors the session cookie). */
@@ -43,7 +45,7 @@ export async function registerWatchRoutes(
   app: FastifyInstance,
   options: WatchRouteOptions,
 ): Promise<void> {
-  const { repo, store, clock, cookieSecure } = options;
+  const { repo, folderRepo, store, clock, cookieSecure } = options;
 
   /**
    * Resolves a slug to a *live* Video for the Viewer: unknown, deleted, and
@@ -54,6 +56,17 @@ export async function registerWatchRoutes(
     const video = await repo.findBySlug(slug);
     if (!video || isExpired(video, clock.now())) return undefined;
     return video;
+  }
+
+  /**
+   * Resolves a slug to a *live* Folder for the Viewer. Like {@link liveVideo},
+   * an unknown Folder collapses to undefined so it shares the one generic 404
+   * (ADR-0002 — no existence leak). Folder expiry (its own password/expiry, with
+   * the Folder→Video cascade) arrives in a later ticket; this resolver is where
+   * that expiry check will live, so the collapse-to-404 path is already in place.
+   */
+  async function liveFolder(slug: string): Promise<Folder | undefined> {
+    return folderRepo.findBySlug(slug);
   }
 
   /** A live Video, but only when it is Ready to play, else undefined. */
@@ -156,6 +169,42 @@ export async function registerWatchRoutes(
     },
   );
 
+  // A Folder shared as a tiled gallery (spec: Viewer story 36). A `/f/<slug>`
+  // link resolves to the Folder's name and its playable Videos as tiles, each a
+  // jumping-off point to `/f/<slug>/<vslug>`. Only Ready, non-expired Videos are
+  // tiled — a Processing/Failed/expired Video has nothing a Viewer can watch, so
+  // it stays out of the gallery rather than offering a dead tile. An unknown (or,
+  // later, expired) Folder is the one generic 404 (ADR-0002, no existence leak).
+  app.get<{ Params: { slug: string } }>('/api/watch/folder/:slug', async (request, reply) => {
+    const folder = await liveFolder(request.params.slug);
+    if (!folder) return notFound(reply);
+
+    const now = clock.now();
+    const tiles = (await repo.listByFolder(folder.id))
+      .filter((video) => video.state === 'ready' && !isExpired(video, now))
+      .map(serializeTile);
+    return reply.send({ folder: { slug: folder.slug, name: folder.name, videos: tiles } });
+  });
+
+  // A single Video opened from within its Folder: `/f/<slug>/<vslug>`. The Video
+  // must actually live in this Folder, else the one generic 404 — so a Folder
+  // link can't be used to probe Videos that aren't in it. The view model is
+  // identical to the standalone `/api/watch/:slug` (playback, poster, and unlock
+  // all still run through the Video's own `/api/watch/:vslug/*` routes); the only
+  // difference is the back-to-gallery affordance the Watch Page then shows.
+  app.get<{ Params: { slug: string; vslug: string } }>(
+    '/api/watch/folder/:slug/:vslug',
+    async (request, reply) => {
+      const folder = await liveFolder(request.params.slug);
+      if (!folder) return notFound(reply);
+
+      const video = await liveVideo(request.params.vslug);
+      if (!video || video.folderId !== folder.id) return notFound(reply);
+      if (sealed(request, video)) return reply.send({ watch: { state: 'protected' as const } });
+      return sendWatchView(reply, video);
+    },
+  );
+
   /** Sends the state-appropriate watch view for an unlocked/open Video. */
   function sendWatchView(reply: FastifyReply, video: Video): FastifyReply {
     switch (video.state) {
@@ -237,5 +286,31 @@ function serializeProcessing(video: Video): ProcessingWatchView {
     slug: video.slug,
     title: video.title,
     description: video.description,
+  };
+}
+
+/** One Video as a gallery tile — enough to render it, never the id or layout. */
+interface GalleryTile {
+  slug: string;
+  title: string;
+  durationSeconds: number | null;
+  /** Whether a password gates the Video (the tile links on; the gate is on open). */
+  protected: boolean;
+  /**
+   * The poster still, or null when the Video is protected — a sealed Video keeps
+   * its Poster sealed (mirroring the media routes), so a shared Folder never
+   * leaks a protected Video's frame before it's unlocked.
+   */
+  posterUrl: string | null;
+}
+
+function serializeTile(video: Video): GalleryTile {
+  const isProtected = video.passwordHash !== null;
+  return {
+    slug: video.slug,
+    title: video.title,
+    durationSeconds: video.durationSeconds,
+    protected: isProtected,
+    posterUrl: isProtected ? null : `/api/watch/${video.slug}/poster.jpg`,
   };
 }

@@ -218,6 +218,59 @@ export async function getWatch(slug: string): Promise<WatchView | null> {
 }
 
 /**
+ * A Folder as a Viewer sees it through its `/f/<slug>` link: the Folder's name
+ * and its playable Videos as tiles. A protected Video keeps its poster sealed
+ * (posterUrl null) until it's opened and unlocked. A link that does not resolve
+ * (unknown/expired) is a null result — the generic "not available" case the
+ * server hides behind one 404 (ADR-0002, no existence leak).
+ */
+export interface FolderView {
+  slug: string;
+  name: string;
+  videos: GalleryTile[];
+}
+
+export interface GalleryTile {
+  slug: string;
+  title: string;
+  durationSeconds: number | null;
+  protected: boolean;
+  posterUrl: string | null;
+}
+
+/** Loads a Folder's gallery view, or null when the `/f/<slug>` link doesn't resolve. */
+export async function getFolder(slug: string): Promise<FolderView | null> {
+  const res = await fetch(`/api/watch/folder/${encodeURIComponent(slug)}`, {
+    credentials: 'same-origin',
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error('Could not load this folder');
+  const data = (await res.json()) as { folder: FolderView };
+  return data.folder;
+}
+
+/**
+ * Loads the watch view for a Video opened from within its Folder
+ * (`/f/<slug>/<vslug>`). Same shape as {@link getWatch}; a null result means the
+ * Video isn't in this Folder (or the Folder/Video doesn't resolve) — the one
+ * generic 404. Playback, poster, and unlock then run through the Video's own
+ * `/api/watch/:vslug/*` routes exactly as a standalone link does.
+ */
+export async function getFolderVideo(
+  folderSlug: string,
+  videoSlug: string,
+): Promise<WatchView | null> {
+  const res = await fetch(
+    `/api/watch/folder/${encodeURIComponent(folderSlug)}/${encodeURIComponent(videoSlug)}`,
+    { credentials: 'same-origin' },
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error('Could not load this video');
+  const data = (await res.json()) as { watch: WatchView };
+  return data.watch;
+}
+
+/**
  * Retries a Failed Video: re-queues transcoding against the retained Source so
  * it goes Failed → Processing. Resolves with the re-queued (Processing) Video.
  * On failure the server's technical reason is surfaced (ADR-0007): a 503 when

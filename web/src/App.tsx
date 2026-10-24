@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { WatchPage } from './WatchPage';
+import { GalleryPage } from './GalleryPage';
 import {
   clearVideoPassword,
   createFolder,
@@ -35,11 +36,35 @@ function watchSlug(pathname: string): string | null {
   return match ? decodeURIComponent(match[1]!) : null;
 }
 
+/**
+ * `/f/<slug>` is a Folder shared as a gallery; `/f/<slug>/<vslug>` is a Video
+ * opened from within it (the Watch Page then shows a back-to-gallery link).
+ */
+function folderRoute(
+  pathname: string,
+): { folderSlug: string; videoSlug: string | null } | null {
+  const match = /^\/f\/([^/]+)(?:\/([^/]+))?\/?$/.exec(pathname);
+  if (!match) return null;
+  return {
+    folderSlug: decodeURIComponent(match[1]!),
+    videoSlug: match[2] ? decodeURIComponent(match[2]) : null,
+  };
+}
+
 export function App() {
-  // The Watch Page is a distinct, account-free surface (ADR-0002): resolve it
-  // straight from the URL before the Operator setup/sign-in flow runs at all.
-  const slug = watchSlug(window.location.pathname);
+  // The Viewer surfaces are distinct, account-free pages (ADR-0002): resolve
+  // them straight from the URL before the Operator setup/sign-in flow runs.
+  const { pathname } = window.location;
+
+  const slug = watchSlug(pathname);
   if (slug) return <WatchPage slug={slug} />;
+
+  const folder = folderRoute(pathname);
+  if (folder) {
+    return folder.videoSlug
+      ? <WatchPage slug={folder.videoSlug} folderSlug={folder.folderSlug} />
+      : <GalleryPage slug={folder.folderSlug} />;
+  }
 
   return <OperatorApp />;
 }
