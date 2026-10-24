@@ -60,7 +60,12 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   await app.register(fastifyCookie, { secret: sessionSecret });
   await app.register(fastifyMultipart, {
+    // The hard ceiling on a Source upload. `throwFileSizeLimit: false` makes an
+    // over-cap file truncate (flagging `file.truncated`) rather than throw mid
+    // -stream, so the upload route detects it, rolls back the partial, and
+    // returns one clear 413 (see src/videos/routes.ts) instead of a generic 500.
     limits: { fileSize: deps.config.maxUploadBytes, files: 1 },
+    throwFileSizeLimit: false,
   });
 
   const session = createSessionManager({
@@ -109,6 +114,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     slugGenerator: deps.slugGenerator,
     clock: deps.clock,
     transcoding,
+    maxUploadBytes: deps.config.maxUploadBytes,
   });
 
   // The public Viewer surface (no session): watch a Video via its Share Link,
