@@ -86,6 +86,17 @@ export interface VideoSummary {
   expiresAt: number | null;
   /** Whether the link has expired as of now (server-evaluated). */
   expired: boolean;
+  /** The owning Folder's slug, or null when the Video sits in the Library root. */
+  folderSlug: string | null;
+  shareUrl: string;
+  createdAt: number;
+}
+
+/** A Folder as the Library sees it. Mirrors the server's FolderView. */
+export interface FolderSummary {
+  slug: string;
+  name: string;
+  videoCount: number;
   shareUrl: string;
   createdAt: number;
 }
@@ -111,6 +122,57 @@ export async function listVideos(): Promise<VideoSummary[]> {
   if (!res.ok) throw new Error('Could not load the Library');
   const data = (await res.json()) as { videos: VideoSummary[] };
   return data.videos;
+}
+
+/** The Operator's Folders, newest first, each with its Video count. */
+export async function listFolders(): Promise<FolderSummary[]> {
+  const res = await fetch('/api/folders', { credentials: 'same-origin' });
+  if (!res.ok) throw new Error('Could not load Folders');
+  const data = (await res.json()) as { folders: FolderSummary[] };
+  return data.folders;
+}
+
+/** Creates a Folder with the given name and returns it (with a `/f/<slug>` link). */
+export async function createFolder(name: string): Promise<FolderSummary> {
+  const res = await fetch('/api/folders', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw await operatorError(res, 'Could not create Folder');
+  const data = (await res.json()) as { folder: FolderSummary };
+  return data.folder;
+}
+
+/** Browses a Folder: the Folder and the Videos it holds. */
+export async function browseFolder(
+  slug: string,
+): Promise<{ folder: FolderSummary; videos: VideoSummary[] }> {
+  const res = await fetch(`/api/folders/${encodeURIComponent(slug)}`, {
+    credentials: 'same-origin',
+  });
+  if (!res.ok) throw await operatorError(res, 'Could not open Folder');
+  return (await res.json()) as { folder: FolderSummary; videos: VideoSummary[] };
+}
+
+/**
+ * Moves a Video into a Folder (by slug) or back to the Library root (null).
+ * A Video belongs to at most one Folder, so this replaces any prior membership.
+ */
+export async function moveVideoToFolder(
+  slug: string,
+  folderSlug: string | null,
+): Promise<VideoSummary> {
+  const res = await fetch(`/api/videos/${encodeURIComponent(slug)}/folder`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ folderSlug }),
+  });
+  if (!res.ok) throw await operatorError(res, 'Could not move Video');
+  const data = (await res.json()) as { video: VideoSummary };
+  return data.video;
 }
 
 /**

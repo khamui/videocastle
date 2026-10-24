@@ -333,9 +333,45 @@ button.ghost {
 
 .delete,
 .password,
-.expiry {
+.expiry,
+.move {
   font-size: 0.8rem;
   padding: 7px 11px;
+}
+
+.back {
+  align-self: flex-start;
+  margin-bottom: 16px;
+}
+
+.folders-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 8px 0;
+}
+
+.folders-head h2 {
+  font-size: 1.1rem;
+}
+
+.folder-grid {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 24px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.folder-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
 }
 
 .pill.expired {

@@ -11,6 +11,7 @@ import { createSessionManager } from './auth/session';
 import { registerAuthRoutes } from './auth/routes';
 import { MediaStore } from './media/media-store';
 import { VideoRepo } from './videos/video-repo';
+import { FolderRepo } from './videos/folder-repo';
 import { createTranscodeWorker, type VideoWorker } from './videos/transcode-worker';
 import { registerVideoRoutes } from './videos/routes';
 import { registerWatchRoutes } from './videos/watch-routes';
@@ -68,6 +69,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   });
 
   const videoRepo = new VideoRepo(deps.db);
+  const folderRepo = new FolderRepo(deps.db);
   const mediaStore = new MediaStore(deps.config.mediaDir);
   const worker = createTranscodeWorker({
     repo: videoRepo,
@@ -101,6 +103,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   await app.register(registerVideoRoutes, {
     session,
     repo: videoRepo,
+    folderRepo,
     worker,
     store: mediaStore,
     slugGenerator: deps.slugGenerator,

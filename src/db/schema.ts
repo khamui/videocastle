@@ -28,6 +28,25 @@ export type Operator = typeof operators.$inferSelect;
 export type NewOperator = typeof operators.$inferInsert;
 
 /**
+ * An Operator-created Folder: a shareable, one-level-deep group of Videos (a
+ * Folder never contains another Folder — see GLOSSARY). The `slug` is the
+ * unguessable `/f/<slug>` Folder Share Link (ADR-0002); a Video points at its
+ * Folder via `videos.folderId`, and a Video in no Folder sits in the Library
+ * root (folderId null).
+ */
+export const folders = sqliteTable('folders', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  /** Unguessable base62 slug; the `/f/<slug>` Folder Share Link. */
+  slug: text('slug').notNull().unique(),
+  name: text('name').notNull(),
+  /** Epoch milliseconds, read from the injected Clock. */
+  createdAt: integer('created_at').notNull(),
+});
+
+export type Folder = typeof folders.$inferSelect;
+export type NewFolder = typeof folders.$inferInsert;
+
+/**
  * An uploaded Video and its transcoding lifecycle. A row exists from the moment
  * the upload stream is saved (state `processing`); the in-process worker fills
  * in the Rendition and Poster references and flips the state to `ready` once
@@ -67,6 +86,11 @@ export const videos = sqliteTable('videos', {
    * generic Viewer 404 (ADR-0002). Set it forward again to re-enable the link.
    */
   expiresAt: integer('expires_at'),
+  /**
+   * The owning Folder, or null when the Video sits in the Library root. A Video
+   * belongs to at most one Folder (a single column — never two at once).
+   */
+  folderId: integer('folder_id').references(() => folders.id),
   /** Short stable failure code (see TranscodeFailureReason); set when Failed. */
   failureReason: text('failure_reason'),
   /** Diagnostic detail for a failure (e.g. trimmed ffmpeg stderr); set when Failed. */
