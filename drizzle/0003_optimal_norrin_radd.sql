@@ -1,0 +1,1 @@
+ALTER TABLE `videos` ADD `password_hash` text;

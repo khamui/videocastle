@@ -80,6 +80,8 @@ export interface VideoSummary {
   durationSeconds: number | null;
   failureReason: string | null;
   failureDetail: string | null;
+  /** Whether a per-Video password gates the Share Link. */
+  protected: boolean;
   shareUrl: string;
   createdAt: number;
 }
@@ -130,7 +132,9 @@ export type WatchView =
       title: string;
       description: string | null;
     }
-  | { state: 'failed' };
+  | { state: 'failed' }
+  /** The link is password-protected and not yet unlocked — the Viewer is prompted. */
+  | { state: 'protected' };
 
 /**
  * Loads the watch view for a Share Link, or null when the link does not resolve
@@ -161,6 +165,59 @@ export async function retryVideo(slug: string): Promise<VideoSummary> {
   if (!res.ok) throw await operatorError(res, 'Retry failed');
   const data = (await res.json()) as { video: VideoSummary };
   return data.video;
+}
+
+/**
+ * Sets a per-Video password (stored hashed server-side). Returns the updated
+ * Video, whose `protected` flag is now true. Surfaces the server's technical
+ * reason on failure (ADR-0007).
+ */
+export async function setVideoPassword(
+  slug: string,
+  password: string,
+): Promise<VideoSummary> {
+  const res = await fetch(`/api/videos/${encodeURIComponent(slug)}/password`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ password }),
+  });
+  if (!res.ok) throw await operatorError(res, 'Could not set password');
+  const data = (await res.json()) as { video: VideoSummary };
+  return data.video;
+}
+
+/** Clears a Video's password, making its Share Link open again. */
+export async function clearVideoPassword(slug: string): Promise<VideoSummary> {
+  const res = await fetch(`/api/videos/${encodeURIComponent(slug)}/password`, {
+    method: 'DELETE',
+    credentials: 'same-origin',
+  });
+  if (!res.ok) throw await operatorError(res, 'Could not clear password');
+  const data = (await res.json()) as { video: VideoSummary };
+  return data.video;
+}
+
+/**
+ * Unlocks a protected Video with the Viewer's password. On success the server
+ * sets a slug-scoped grant cookie and returns the now-visible watch view;
+ * returns null for a wrong password (a flat, opaque rejection — ADR-0002).
+ * Throws only on an unexpected transport error.
+ */
+export async function unlockWatch(
+  slug: string,
+  password: string,
+): Promise<WatchView | null> {
+  const res = await fetch(`/api/watch/${encodeURIComponent(slug)}/unlock`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ password }),
+  });
+  if (res.status === 401 || res.status === 404) return null;
+  if (!res.ok) throw new Error('Could not unlock this video');
+  const data = (await res.json()) as { watch: WatchView };
+  return data.watch;
 }
 
 /**

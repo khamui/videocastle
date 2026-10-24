@@ -1,6 +1,7 @@
 import { createWriteStream } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
+import { hashPassword } from '../auth/password';
 import type { Clock } from '../ports/clock';
 import type { SlugGenerator } from '../ports/slug';
 import type { Video } from '../db/schema';
@@ -131,12 +132,7 @@ export async function registerVideoRoutes(
     requireOperator,
     async (request, reply) => {
       const video = await repo.findBySlug(request.params.slug);
-      if (!video) {
-        return reply.code(404).send({
-          error: 'video_not_found',
-          detail: `No Video with slug "${request.params.slug}".`,
-        });
-      }
+      if (!video) return videoNotFound(reply, request.params.slug);
       if (video.state !== 'failed') {
         return reply.code(409).send({
           error: 'not_retryable',
@@ -185,19 +181,65 @@ export async function registerVideoRoutes(
     requireOperator,
     async (request, reply) => {
       const video = await repo.findBySlug(request.params.slug);
-      if (!video) {
-        // Operator surface (ADR-0007): the real reason, not a genericised one.
-        return reply.code(404).send({
-          error: 'video_not_found',
-          detail: `No Video with slug "${request.params.slug}".`,
-        });
-      }
+      // Operator surface (ADR-0007): the real reason, not a genericised one.
+      if (!video) return videoNotFound(reply, request.params.slug);
 
       await repo.delete(video.id);
       await store.removeVideo(video.id);
       return reply.code(204).send();
     },
   );
+
+  // Protect a Video with a password (spec: Operator story — password-protect a
+  // link). The password is stored hashed (scrypt, same as the Operator
+  // credential); the plaintext is never persisted or echoed back. Setting a
+  // password on an already-protected Video simply replaces it.
+  app.post<{ Params: { slug: string }; Body: { password?: unknown } }>(
+    '/api/videos/:slug/password',
+    requireOperator,
+    async (request, reply) => {
+      const video = await repo.findBySlug(request.params.slug);
+      if (!video) return videoNotFound(reply, request.params.slug);
+
+      const password =
+        typeof request.body?.password === 'string' ? request.body.password.trim() : '';
+      if (password.length === 0) {
+        return reply.code(400).send({
+          error: 'missing_password',
+          detail: 'A non-empty password is required to protect a Video.',
+        });
+      }
+
+      await repo.setPasswordHash(video.id, await hashPassword(password));
+      const updated = await repo.findById(video.id);
+      return reply.code(200).send({ video: serializeVideo(updated ?? video) });
+    },
+  );
+
+  // Remove a Video's password, making its Share Link open again.
+  app.delete<{ Params: { slug: string } }>(
+    '/api/videos/:slug/password',
+    requireOperator,
+    async (request, reply) => {
+      const video = await repo.findBySlug(request.params.slug);
+      if (!video) return videoNotFound(reply, request.params.slug);
+
+      await repo.setPasswordHash(video.id, null);
+      const updated = await repo.findById(video.id);
+      return reply.code(200).send({ video: serializeVideo(updated ?? video) });
+    },
+  );
+}
+
+/** The Operator-facing not-found (ADR-0007: the real reason, naming the slug). */
+function videoNotFound(
+  reply: import('fastify').FastifyReply,
+  slug: string,
+): import('fastify').FastifyReply {
+  return reply.code(404).send({
+    error: 'video_not_found',
+    detail: `No Video with slug "${slug}".`,
+  });
 }
 
 /**
@@ -216,6 +258,8 @@ export interface VideoView {
   failureReason: string | null;
   /** Diagnostic detail for a failure, else null. Shown to the single Operator. */
   failureDetail: string | null;
+  /** Whether a per-Video password gates the Share Link. The hash is never exposed. */
+  protected: boolean;
   shareUrl: string;
   createdAt: number;
 }
@@ -230,6 +274,7 @@ function serializeVideo(video: Video): VideoView {
     durationSeconds: video.durationSeconds,
     failureReason: video.failureReason,
     failureDetail: video.failureDetail,
+    protected: video.passwordHash !== null,
     shareUrl: `/v/${video.slug}`,
     createdAt: video.createdAt,
   };

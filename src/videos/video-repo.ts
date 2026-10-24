@@ -124,6 +124,18 @@ export class VideoRepo {
       .where(eq(videos.id, id));
   }
 
+  /**
+   * Sets or clears a Video's password. Pass a scrypt hash to protect the Share
+   * Link, or `null` to make it open again. The caller owns hashing (and the
+   * decision to protect/unprotect); the repo just persists the value.
+   */
+  async setPasswordHash(id: number, passwordHash: string | null): Promise<void> {
+    await this.db
+      .update(videos)
+      .set({ passwordHash })
+      .where(eq(videos.id, id));
+  }
+
   /** Removes a Video row — used to roll back a failed upload before it transcodes. */
   async delete(id: number): Promise<void> {
     await this.db.delete(videos).where(eq(videos.id, id));
