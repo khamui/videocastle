@@ -1,10 +1,12 @@
 import { spawn } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import type {
-  Transcoder,
-  TranscodeRequest,
-  TranscodeResult,
+import {
+  TranscodeError,
+  type Transcoder,
+  type TranscodeRequest,
+  type TranscodeResult,
+  type TranscoderAvailability,
 } from '../ports/transcoder';
 
 /**
@@ -16,15 +18,24 @@ import type {
  * separately and lightly rather than in the behavioural suite.
  *
  * Real-world input matters here: phones (e.g. an iPhone's `.mov`) record 10-bit
- * HEVC in HDR (HLG / Dolby Vision). Transcoding that straight through would
- * yield a 10-bit / HDR H.264 that browsers can't play and that looks washed
- * out. So the output is always forced to 8-bit `yuv420p`, and HDR sources are
- * tone-mapped down to SDR Rec.709 first (see {@link buildVideoFilter}).
+ * HEVC in HDR (HLG / Dolby Vision) with extra audio (spatial `apple_apac`) and
+ * data streams. So the pipeline:
+ *  - maps exactly the first video + first audio, dropping everything else
+ *    deterministically (rather than ffmpeg's "best stream" guess);
+ *  - always outputs 8-bit `yuv420p` H.264 + stereo AAC (universally playable),
+ *    tone-mapping HDR (PQ/HLG) down to SDR Rec.709 first (see {@link buildVideoFilter});
+ *  - forces keyframes on segment boundaries so HLS splits cleanly.
+ *
+ * Failures reject with a typed {@link TranscodeError} carrying a reason code and
+ * a trimmed ffmpeg stderr tail, so the Operator sees why rather than just "failed".
  */
 
 const RENDITION_DIR = 'rendition';
 const PLAYLIST_NAME = 'index.m3u8';
 const POSTER_NAME = 'poster.jpg';
+const SEGMENT_SECONDS = 6;
+/** Max stderr kept as failure detail, so the DB stays tidy. */
+const DETAIL_MAX = 2000;
 
 /** Transfer characteristics that mark a source as HDR (needs tone-mapping). */
 const HDR_TRANSFERS = new Set([
@@ -49,6 +60,26 @@ export function createFfmpegTranscoder(options: FfmpegOptions = {}): Transcoder 
   const ffprobe = options.ffprobePath ?? 'ffprobe';
 
   return {
+    async checkAvailable(): Promise<TranscoderAvailability> {
+      let version: string | undefined;
+      for (const bin of [ffmpeg, ffprobe]) {
+        try {
+          const { stdout } = await run(bin, ['-version']);
+          version ??= parseVersion(stdout);
+        } catch (err) {
+          return {
+            available: false,
+            version: undefined,
+            error:
+              err instanceof RunError && err.notFound
+                ? `${bin} not found on PATH`
+                : messageOf(err),
+          };
+        }
+      }
+      return { available: true, version, error: undefined };
+    },
+
     async transcode(request: TranscodeRequest): Promise<TranscodeResult> {
       const renditionDir = join(request.outputDir, RENDITION_DIR);
       await mkdir(renditionDir, { recursive: true });
@@ -101,36 +132,46 @@ async function probeSource(
   ffprobe: string,
   sourcePath: string,
 ): Promise<SourceInfo> {
-  const { stdout } = await run(ffprobe, [
-    '-v',
-    'error',
-    '-select_streams',
-    'v:0',
-    '-show_entries',
-    'stream=color_transfer:format=duration',
-    '-of',
-    'json',
-    sourcePath,
-  ]);
-
-  let durationSeconds = 0;
-  let colorTransfer: string | undefined;
+  let stdout: string;
   try {
-    const parsed = JSON.parse(stdout) as {
-      streams?: Array<{ color_transfer?: string }>;
-      format?: { duration?: string };
-    };
-    const seconds = Number.parseFloat(parsed.format?.duration ?? '');
-    if (Number.isFinite(seconds) && seconds > 0) durationSeconds = seconds;
-    colorTransfer = parsed.streams?.[0]?.color_transfer;
-  } catch {
-    // Leave defaults; a zero duration just disables progress reporting.
+    ({ stdout } = await run(ffprobe, [
+      '-v',
+      'error',
+      '-select_streams',
+      'v:0',
+      '-show_entries',
+      'stream=color_transfer,width,height:format=duration',
+      '-of',
+      'json',
+      sourcePath,
+    ]));
+  } catch (err) {
+    throw asTranscodeError(err, 'probe_failed');
   }
 
-  return { durationSeconds, isHdr: isHdrTransfer(colorTransfer) };
+  let parsed: {
+    streams?: Array<{ color_transfer?: string }>;
+    format?: { duration?: string };
+  };
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    throw new TranscodeError('probe_failed', 'ffprobe returned unreadable output');
+  }
+
+  // `-select_streams v:0` yields no streams for an audio-only / video-less file.
+  if (!parsed.streams || parsed.streams.length === 0) {
+    throw new TranscodeError('no_video_stream', 'the Source has no video stream');
+  }
+
+  let durationSeconds = 0;
+  const seconds = Number.parseFloat(parsed.format?.duration ?? '');
+  if (Number.isFinite(seconds) && seconds > 0) durationSeconds = seconds;
+
+  return { durationSeconds, isHdr: isHdrTransfer(parsed.streams[0]?.color_transfer) };
 }
 
-function runFfmpegTranscode(
+async function runFfmpegTranscode(
   ffmpeg: string,
   request: TranscodeRequest,
   renditionDir: string,
@@ -141,6 +182,12 @@ function runFfmpegTranscode(
     '-y',
     '-i',
     request.sourcePath,
+    // Take exactly the first video and the first audio (optional, so no-audio
+    // Sources still work); drop data/subtitle/extra-audio (e.g. apple_apac).
+    '-map',
+    '0:v:0',
+    '-map',
+    '0:a:0?',
     '-vf',
     buildVideoFilter(info.isHdr),
     '-pix_fmt',
@@ -151,6 +198,9 @@ function runFfmpegTranscode(
     'veryfast',
     '-crf',
     '23',
+    // Force a keyframe on each segment boundary so HLS segments split cleanly.
+    '-force_key_frames',
+    `expr:gte(t,n_forced*${SEGMENT_SECONDS})`,
     // Tag the output as SDR Rec.709 (correct after tone-mapping; harmless for
     // already-SDR HD sources).
     '-colorspace',
@@ -168,7 +218,7 @@ function runFfmpegTranscode(
     '-ac',
     '2',
     '-hls_time',
-    '6',
+    String(SEGMENT_SECONDS),
     '-hls_playlist_type',
     'vod',
     '-hls_segment_filename',
@@ -184,13 +234,16 @@ function runFfmpegTranscode(
       ? makeProgressReader(info.durationSeconds, request.onProgress)
       : undefined;
 
-  return run(ffmpeg, args, onStdout).then(() => {
-    // Nudge to 100% on success; `markReady` will pin it there regardless.
-    request.onProgress?.(100);
-  });
+  try {
+    await run(ffmpeg, args, onStdout);
+  } catch (err) {
+    throw asTranscodeError(err, 'encode_failed');
+  }
+  // Nudge to 100% on success; `markReady` will pin it there regardless.
+  await request.onProgress?.(100);
 }
 
-function grabPoster(
+async function grabPoster(
   ffmpeg: string,
   request: TranscodeRequest,
   info: SourceInfo,
@@ -199,14 +252,44 @@ function grabPoster(
   const args = ['-nostdin', '-y', '-ss', at.toFixed(3), '-i', request.sourcePath];
   // An HDR still must be tone-mapped too, or the poster looks washed out.
   if (info.isHdr) args.push('-vf', TONEMAP_CHAIN);
-  args.push(
-    '-frames:v',
-    '1',
-    '-q:v',
-    '3',
-    join(request.outputDir, POSTER_NAME),
-  );
-  return run(ffmpeg, args).then(() => undefined);
+  args.push('-frames:v', '1', '-q:v', '3', join(request.outputDir, POSTER_NAME));
+  try {
+    await run(ffmpeg, args);
+  } catch (err) {
+    throw asTranscodeError(err, 'poster_failed');
+  }
+}
+
+/** Parses the version token from an `ffmpeg -version` first line. */
+function parseVersion(stdout: string): string | undefined {
+  return /version\s+(\S+)/.exec(stdout)?.[1];
+}
+
+/** Maps a low-level run failure to a typed, reason-carrying transcode error. */
+function asTranscodeError(
+  err: unknown,
+  reason: TranscodeError['reason'],
+): TranscodeError {
+  if (err instanceof RunError) {
+    if (err.notFound) {
+      return new TranscodeError(
+        'ffmpeg_not_found',
+        `${err.command} not found on PATH — install ffmpeg to transcode Videos`,
+      );
+    }
+    return new TranscodeError(reason, err.message, tail(err.stderr));
+  }
+  return new TranscodeError(reason, messageOf(err));
+}
+
+function tail(text: string): string | undefined {
+  const trimmed = text.trim();
+  if (!trimmed) return undefined;
+  return trimmed.length > DETAIL_MAX ? trimmed.slice(-DETAIL_MAX) : trimmed;
+}
+
+function messageOf(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 /**
@@ -243,7 +326,30 @@ function makeProgressReader(
   };
 }
 
-/** Spawns a command, resolving with its stdout or rejecting on nonzero exit. */
+/** A failed child process: the binary was missing, or it exited nonzero. */
+class RunError extends Error {
+  readonly command: string;
+  readonly notFound: boolean;
+  readonly exitCode: number | null;
+  readonly stderr: string;
+
+  constructor(opts: {
+    command: string;
+    notFound: boolean;
+    exitCode: number | null;
+    stderr: string;
+    message: string;
+  }) {
+    super(opts.message);
+    this.name = 'RunError';
+    this.command = opts.command;
+    this.notFound = opts.notFound;
+    this.exitCode = opts.exitCode;
+    this.stderr = opts.stderr;
+  }
+}
+
+/** Spawns a command, resolving with its stdout or rejecting with a RunError. */
 function run(
   command: string,
   args: string[],
@@ -265,21 +371,33 @@ function run(
     });
 
     child.on('error', (err: NodeJS.ErrnoException) => {
-      // The most common first-run failure: the binary isn't installed. Say so
-      // plainly rather than surfacing a bare ENOENT.
-      if (err.code === 'ENOENT') {
-        reject(
-          new Error(
-            `${command} not found on PATH — install ffmpeg to transcode Videos`,
-          ),
-        );
-      } else {
-        reject(err);
-      }
+      const notFound = err.code === 'ENOENT';
+      reject(
+        new RunError({
+          command,
+          notFound,
+          exitCode: null,
+          stderr,
+          message: notFound
+            ? `${command} not found on PATH`
+            : `${command} failed to start: ${err.message}`,
+        }),
+      );
     });
     child.on('close', (code) => {
-      if (code === 0) resolve({ stdout });
-      else reject(new Error(`${command} exited with code ${code}: ${stderr.trim()}`));
+      if (code === 0) {
+        resolve({ stdout });
+      } else {
+        reject(
+          new RunError({
+            command,
+            notFound: false,
+            exitCode: code,
+            stderr,
+            message: `${command} exited with code ${code}`,
+          }),
+        );
+      }
     });
   });
 }

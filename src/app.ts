@@ -13,6 +13,7 @@ import { MediaStore } from './media/media-store';
 import { VideoRepo } from './videos/video-repo';
 import { createTranscodeWorker, type VideoWorker } from './videos/transcode-worker';
 import { registerVideoRoutes } from './videos/routes';
+import { createTranscodingStatus } from './system/transcoding-status';
 import { registerWebServer } from './web-server';
 
 declare module 'fastify' {
@@ -76,6 +77,20 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   });
   app.decorate('videoWorker', worker);
 
+  // Probe transcoding availability once at boot so uploads can be gated and the
+  // Dashboard warned; log the result loudly since a missing ffmpeg is the most
+  // common operational failure.
+  const transcoding = createTranscodingStatus(deps.transcoder);
+  const availability = await transcoding.refresh();
+  if (availability.available) {
+    app.log.info({ ffmpeg: availability.version }, 'transcoding available');
+  } else {
+    app.log.warn(
+      { error: availability.error },
+      'transcoding unavailable — uploads will be refused until ffmpeg is runnable',
+    );
+  }
+
   await app.register(registerAuthRoutes, {
     repo: operatorRepo,
     clock: deps.clock,
@@ -89,6 +104,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     store: mediaStore,
     slugGenerator: deps.slugGenerator,
     clock: deps.clock,
+    transcoding,
   });
 
   await registerWebServer(app, deps.config.webDistDir);

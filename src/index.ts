@@ -4,7 +4,7 @@ import { loadConfig } from './config';
 import { openDatabase } from './db/client';
 import { systemClock } from './ports/clock';
 import { createSlugGenerator } from './ports/slug';
-import { ffmpegTranscoder } from './transcode/ffmpeg-transcoder';
+import { createFfmpegTranscoder } from './transcode/ffmpeg-transcoder';
 
 /** Production entrypoint: wire the real collaborators and start listening. */
 async function main(): Promise<void> {
@@ -18,7 +18,10 @@ async function main(): Promise<void> {
     db: database.db,
     clock: systemClock,
     slugGenerator: createSlugGenerator(),
-    transcoder: ffmpegTranscoder,
+    transcoder: createFfmpegTranscoder({
+      ffmpegPath: config.ffmpegPath,
+      ffprobePath: config.ffprobePath,
+    }),
     config: { ...config, webDistDir },
     logger: true,
   });
@@ -32,7 +35,19 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
   process.on('SIGINT', () => void shutdown('SIGINT'));
 
-  await app.listen({ host: config.host, port: config.port });
+  try {
+    await app.listen({ host: config.host, port: config.port });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EADDRINUSE') {
+      // eslint-disable-next-line no-console
+      console.error(
+        `Port ${config.port} is already in use — is another dev server running? ` +
+          `Stop it, or set PORT to a free port.`,
+      );
+      process.exit(1);
+    }
+    throw err;
+  }
   // eslint-disable-next-line no-console
   console.log(`videocastle listening on http://${config.host}:${config.port}`);
 }

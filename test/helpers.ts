@@ -11,6 +11,7 @@ import type {
   Transcoder,
   TranscodeRequest,
   TranscodeResult,
+  TranscoderAvailability,
 } from '../src/ports/transcoder';
 import type { VideoWorker } from '../src/videos/transcode-worker';
 
@@ -61,6 +62,8 @@ export interface FakeTranscoder extends Transcoder {
   requests: TranscodeRequest[];
   result: TranscodeResult;
   auto: boolean;
+  /** Whether `checkAvailable` reports transcoding as usable (default true). */
+  available: boolean;
   progress(percent: number): Promise<void>;
   complete(result?: TranscodeResult): Promise<void>;
   fail(err: Error): Promise<void>;
@@ -83,6 +86,14 @@ export function createFakeTranscoder(): FakeTranscoder {
       durationSeconds: 42,
     },
     auto: true,
+    available: true,
+    checkAvailable(): Promise<TranscoderAvailability> {
+      return Promise.resolve(
+        fake.available
+          ? { available: true, version: 'fake-1.0', error: undefined }
+          : { available: false, version: undefined, error: 'fake unavailable' },
+      );
+    },
     transcode(request) {
       fake.requests.push(request);
       if (fake.auto) return Promise.resolve(fake.result);
@@ -128,12 +139,18 @@ export interface TestApp {
  * simulate a restart (a fresh app over the same persisted data).
  */
 export async function buildTestApp(
-  overrides: { db?: DatabaseHandle; env?: NodeJS.ProcessEnv } = {},
+  overrides: {
+    db?: DatabaseHandle;
+    env?: NodeJS.ProcessEnv;
+    /** Boot the app with transcoding reported (un)available (default true). */
+    transcoderAvailable?: boolean;
+  } = {},
 ): Promise<TestApp> {
   const db = overrides.db ?? openDatabase(':memory:');
   const clock = createFakeClock();
   const slugGenerator = createFakeSlugGenerator();
   const transcoder = createFakeTranscoder();
+  if (overrides.transcoderAvailable === false) transcoder.available = false;
   const mediaDir = mkdtempSync(join(tmpdir(), 'vc-media-'));
   const config = loadConfig({ MEDIA_DIR: mediaDir, ...overrides.env });
 

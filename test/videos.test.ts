@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { TranscodeError } from '../src/ports/transcoder';
 import { buildTestApp, type TestApp } from './helpers';
 
 type InjectResponse = Awaited<ReturnType<TestApp['app']['inject']>>;
@@ -231,7 +232,7 @@ describe('transcoding to Ready', () => {
     expect(done.json().videos[0]).toMatchObject({ state: 'ready', progress: 100 });
   });
 
-  it('marks the Video Failed when the transcode errors', async () => {
+  it('marks the Video Failed and surfaces the reason when the transcode errors', async () => {
     const { app, jar, transcoder, worker } = await signedIn();
     transcoder.auto = false;
 
@@ -241,7 +242,9 @@ describe('transcoding to Ready', () => {
     });
     await waitFor(() => transcoder.requests.length === 1);
 
-    await transcoder.fail(new Error('ffmpeg blew up'));
+    await transcoder.fail(
+      new TranscodeError('encode_failed', 'ffmpeg blew up', 'stderr tail here'),
+    );
     await worker.idle();
 
     const list = await app.inject({
@@ -249,6 +252,60 @@ describe('transcoding to Ready', () => {
       url: '/api/videos',
       cookies: jar,
     });
-    expect(list.json().videos[0]).toMatchObject({ state: 'failed' });
+    expect(list.json().videos[0]).toMatchObject({
+      state: 'failed',
+      failureReason: 'encode_failed',
+      failureDetail: 'stderr tail here',
+    });
+  });
+});
+
+describe('transcoding availability', () => {
+  it('reports transcoding available with a version in the normal case', async () => {
+    const { app, jar } = await signedIn();
+
+    const res = await app.inject({ method: 'GET', url: '/api/status', cookies: jar });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      transcoding: { available: true, version: 'fake-1.0' },
+    });
+  });
+
+  it('refuses uploads with 503 and writes nothing when transcoding is unavailable', async () => {
+    current = await buildTestApp({ transcoderAvailable: false });
+    const setupRes = await current.app.inject({
+      method: 'POST',
+      url: '/api/setup',
+      payload: OPERATOR,
+    });
+    const jar = cookieJar(setupRes);
+    const { app, config } = current;
+
+    const res = await uploadVideo(app, jar, {
+      fields: { title: 'Clip' },
+      file: { fieldname: 'file', filename: 'clip.mp4', content: 'bytes' },
+    });
+
+    expect(res.statusCode).toBe(503);
+    expect(res.json()).toEqual({ error: 'transcoding_unavailable' });
+
+    // No Video row and no Source written.
+    const list = await app.inject({ method: 'GET', url: '/api/videos', cookies: jar });
+    expect(list.json().videos).toHaveLength(0);
+    expect(readdirSync(config.mediaDir)).toHaveLength(0);
+
+    const status = await app.inject({ method: 'GET', url: '/api/status', cookies: jar });
+    expect(status.json()).toEqual({
+      transcoding: { available: false, version: null },
+    });
+  });
+
+  it('requires an authenticated Operator for status', async () => {
+    current = await buildTestApp();
+    await current.app.inject({ method: 'POST', url: '/api/setup', payload: OPERATOR });
+
+    const res = await current.app.inject({ method: 'GET', url: '/api/status' });
+    expect(res.statusCode).toBe(401);
   });
 });

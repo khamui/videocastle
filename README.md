@@ -76,6 +76,8 @@ restarts. Configure via environment variables — see `.env.example`.
 | `DATA_DIR`       | `./data`  | Root for SQLite and media; mount a volume here in production.  |
 | `MEDIA_DIR`      | `$DATA_DIR/media` | Where Sources, Renditions, and Posters are written.   |
 | `MAX_UPLOAD_BYTES` | `2147483648` | Largest accepted upload (bytes); default ~2 GB.          |
+| `FFMPEG_PATH`    | `ffmpeg`  | ffmpeg binary used for transcoding.                            |
+| `FFPROBE_PATH`   | `ffprobe` | ffprobe binary used for probing Sources.                       |
 | `SESSION_SECRET` | _(auto)_  | Session-signing secret; generated and persisted on first run.  |
 | `COOKIE_SECURE`  | `false`   | Set `true` when a reverse proxy terminates TLS.                |
 

@@ -1,4 +1,4 @@
-import type { Transcoder } from '../ports/transcoder';
+import { TranscodeError, type Transcoder } from '../ports/transcoder';
 import type { MediaStore } from '../media/media-store';
 import type { VideoRepo } from './video-repo';
 
@@ -59,11 +59,15 @@ export function createTranscodeWorker(
       await deps.repo.markReady(videoId, result);
     } catch (err) {
       onError(videoId, err);
+      const failure =
+        err instanceof TranscodeError
+          ? { reason: err.reason, detail: err.detail }
+          : { reason: 'encode_failed', detail: messageOf(err) };
       // Best-effort: if even marking Failed throws (e.g. the DB is closing
       // during shutdown), contain it so a background job can never surface as
       // an unhandled rejection.
       try {
-        await deps.repo.markFailed(videoId);
+        await deps.repo.markFailed(videoId, failure);
       } catch (failErr) {
         onError(videoId, failErr);
       }
@@ -97,4 +101,8 @@ export function createTranscodeWorker(
 function clampPercent(percent: number): number {
   if (!Number.isFinite(percent)) return 0;
   return Math.max(0, Math.min(100, Math.round(percent)));
+}
+
+function messageOf(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }

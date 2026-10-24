@@ -139,6 +139,24 @@ button.ghost {
   text-align: center;
 }
 
+.banner {
+  background: rgba(240, 180, 84, 0.12);
+  border: 1px solid rgba(240, 180, 84, 0.4);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 18px;
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+.banner code {
+  background: var(--bg);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.85em;
+}
+
 /* --- Upload --- */
 .upload {
   display: flex;
@@ -202,6 +220,10 @@ button.ghost {
     #333845 10px,
     #333845 20px
   );
+}
+
+.thumb-failed {
+  background: #3a2a2e;
 }
 
 .thumb-0 { background: linear-gradient(135deg, #6a7fd6, #9c6ae0); }
@@ -278,4 +300,11 @@ button.ghost {
   align-self: flex-start;
   font-size: 0.8rem;
   padding: 7px 11px;
+}
+
+.fail-reason {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--error);
+  cursor: help;
 }

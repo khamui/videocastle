@@ -88,9 +88,22 @@ export class VideoRepo {
       .where(eq(videos.id, id));
   }
 
-  /** Marks a Video Failed after a transcode error (retry lands in a later ticket). */
-  async markFailed(id: number): Promise<void> {
-    await this.db.update(videos).set({ state: 'failed' }).where(eq(videos.id, id));
+  /**
+   * Marks a Video Failed after a transcode error, recording why so the Operator
+   * sees an actionable reason (retry lands in a later ticket).
+   */
+  async markFailed(
+    id: number,
+    failure: { reason: string; detail?: string },
+  ): Promise<void> {
+    await this.db
+      .update(videos)
+      .set({
+        state: 'failed',
+        failureReason: failure.reason,
+        failureDetail: failure.detail ?? null,
+      })
+      .where(eq(videos.id, id));
   }
 
   /** Removes a Video row — used to roll back a failed upload before it transcodes. */

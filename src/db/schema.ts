@@ -54,6 +54,10 @@ export const videos = sqliteTable('videos', {
   posterPath: text('poster_path'),
   /** Source duration in seconds, probed during transcoding; set when Ready. */
   durationSeconds: integer('duration_seconds'),
+  /** Short stable failure code (see TranscodeFailureReason); set when Failed. */
+  failureReason: text('failure_reason'),
+  /** Diagnostic detail for a failure (e.g. trimmed ffmpeg stderr); set when Failed. */
+  failureDetail: text('failure_detail'),
   /** Epoch milliseconds, read from the injected Clock. */
   createdAt: integer('created_at').notNull(),
 });

@@ -7,6 +7,7 @@ import type { SlugGenerator } from '../ports/slug';
 import type { Video } from '../db/schema';
 import type { MediaStore } from '../media/media-store';
 import type { SessionManager } from '../auth/session';
+import type { TranscodingStatus } from '../system/transcoding-status';
 import type { VideoRepo } from './video-repo';
 import type { VideoWorker } from './transcode-worker';
 
@@ -17,14 +18,25 @@ export interface VideoRouteOptions extends FastifyPluginOptions {
   store: MediaStore;
   slugGenerator: SlugGenerator;
   clock: Clock;
+  transcoding: TranscodingStatus;
 }
 
 export async function registerVideoRoutes(
   app: FastifyInstance,
   options: VideoRouteOptions,
 ): Promise<void> {
-  const { session, repo, worker, store, slugGenerator, clock } = options;
+  const { session, repo, worker, store, slugGenerator, clock, transcoding } =
+    options;
   const requireOperator = { preHandler: session.requireOperator } as const;
+
+  // Transcoding health, so the Dashboard can warn (and we can gate uploads)
+  // when ffmpeg isn't runnable. Re-probes so recovery needs no restart.
+  app.get('/api/status', requireOperator, async () => {
+    const status = await transcoding.refresh();
+    return {
+      transcoding: { available: status.available, version: status.version ?? null },
+    };
+  });
 
   // Upload a Video. The file streams straight to disk (never buffered whole in
   // memory); the response returns the moment the Source is saved — in the
@@ -32,6 +44,16 @@ export async function registerVideoRoutes(
   // background worker. The client must send the `title`/`description` field
   // parts *before* the file part so the metadata is known when the file arrives.
   app.post('/api/videos', requireOperator, async (request, reply) => {
+    // Refuse before reading the body when transcoding can't run — nothing good
+    // can come of saving a Source we can't process. Re-probe first so an
+    // Operator who just installed ffmpeg isn't blocked by a stale boot check.
+    if (!transcoding.current().available) {
+      await transcoding.refresh();
+      if (!transcoding.current().available) {
+        return reply.code(503).send({ error: 'transcoding_unavailable' });
+      }
+    }
+
     let title: string | undefined;
     let description: string | null = null;
     let created: Video | undefined;
@@ -102,6 +124,10 @@ export interface VideoView {
   state: string;
   progress: number;
   durationSeconds: number | null;
+  /** Failure code when `state === 'failed'`, else null (see TranscodeFailureReason). */
+  failureReason: string | null;
+  /** Diagnostic detail for a failure, else null. Shown to the single Operator. */
+  failureDetail: string | null;
   shareUrl: string;
   createdAt: number;
 }
@@ -114,6 +140,8 @@ function serializeVideo(video: Video): VideoView {
     state: video.state,
     progress: video.progress,
     durationSeconds: video.durationSeconds,
+    failureReason: video.failureReason,
+    failureDetail: video.failureDetail,
     shareUrl: `/v/${video.slug}`,
     createdAt: video.createdAt,
   };

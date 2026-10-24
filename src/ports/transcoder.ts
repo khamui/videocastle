@@ -30,6 +30,49 @@ export interface TranscodeResult {
   durationSeconds: number;
 }
 
+/**
+ * Why a transcode failed, as a small stable set the UI and storage can rely on.
+ * `transcode` rejects with a {@link TranscodeError} carrying one of these so the
+ * Operator sees an actionable reason instead of a bare "failed".
+ */
+export type TranscodeFailureReason =
+  | 'ffmpeg_not_found' // the ffmpeg/ffprobe binary isn't installed / on PATH
+  | 'probe_failed' // ffprobe couldn't read the Source
+  | 'no_video_stream' // the Source has no video to transcode
+  | 'encode_failed' // ffmpeg errored while producing the Rendition
+  | 'poster_failed'; // ffmpeg errored while grabbing the Poster
+
+export class TranscodeError extends Error {
+  readonly reason: TranscodeFailureReason;
+  /** A short diagnostic (e.g. a trimmed ffmpeg stderr tail), if any. */
+  readonly detail: string | undefined;
+
+  constructor(
+    reason: TranscodeFailureReason,
+    message: string,
+    detail?: string,
+  ) {
+    super(message);
+    this.name = 'TranscodeError';
+    this.reason = reason;
+    this.detail = detail;
+  }
+}
+
+/** Whether transcoding is usable right now, with the backend version if known. */
+export interface TranscoderAvailability {
+  available: boolean;
+  version: string | undefined;
+  /** Why it's unavailable, when it isn't. */
+  error: string | undefined;
+}
+
 export interface Transcoder {
+  /** Transcodes a Source; rejects with a {@link TranscodeError} on failure. */
   transcode(request: TranscodeRequest): Promise<TranscodeResult>;
+  /**
+   * Reports whether transcoding can run (e.g. the real backend checks that
+   * ffmpeg/ffprobe are present). Used at boot and to gate uploads.
+   */
+  checkAvailable(): Promise<TranscoderAvailability>;
 }

@@ -2,12 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import {
   getMe,
   getNeedsSetup,
+  getStatus,
   listVideos,
   setup,
   signIn,
   signOut,
   uploadVideo,
   type OperatorSummary,
+  type TranscodingStatus,
   type VideoSummary,
 } from './api';
 
@@ -76,11 +78,14 @@ function Dashboard(props: {
   onSignOut: () => Promise<void>;
 }) {
   const [videos, setVideos] = useState<VideoSummary[] | null>(null);
+  const [status, setStatus] = useState<TranscodingStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function refresh(): Promise<void> {
     try {
-      setVideos(await listVideos());
+      const [vids, stat] = await Promise.all([listVideos(), getStatus()]);
+      setVideos(vids);
+      setStatus(stat);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load the Library');
     }
@@ -110,7 +115,19 @@ function Dashboard(props: {
         </div>
       </header>
 
-      <UploadForm onUploaded={() => void refresh()} />
+      {status && !status.available && (
+        <div className="banner">
+          <strong>Transcoding is unavailable.</strong> ffmpeg isn’t runnable on
+          the server, so uploads are paused. Install ffmpeg (or set
+          <code>FFMPEG_PATH</code>) and it resumes automatically — no restart
+          needed.
+        </div>
+      )}
+
+      <UploadForm
+        disabled={status != null && !status.available}
+        onUploaded={() => void refresh()}
+      />
 
       {error && <p className="error">{error}</p>}
 
@@ -131,7 +148,7 @@ function Dashboard(props: {
   );
 }
 
-function UploadForm(props: { onUploaded: () => void }) {
+function UploadForm(props: { onUploaded: () => void; disabled?: boolean }) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [file, setFile] = useState<File | null>(null);
@@ -176,7 +193,12 @@ function UploadForm(props: { onUploaded: () => void }) {
           onChange={(e) => setFile(e.target.files?.[0] ?? null)}
           required
         />
-        <button type="submit" disabled={busy || !file || title.trim().length === 0}>
+        <button
+          type="submit"
+          disabled={
+            props.disabled || busy || !file || title.trim().length === 0
+          }
+        >
           {busy ? 'Uploading…' : 'Upload'}
         </button>
       </div>
@@ -208,7 +230,15 @@ function VideoCard(props: { video: VideoSummary }) {
 
   return (
     <li className="card video-card">
-      <div className={`thumb ${video.state === 'processing' ? 'thumb-processing' : `thumb-${hashIndex(video.slug)}`}`}>
+      <div
+        className={`thumb ${
+          video.state === 'processing'
+            ? 'thumb-processing'
+            : video.state === 'failed'
+              ? 'thumb-failed'
+              : `thumb-${hashIndex(video.slug)}`
+        }`}
+      >
         {video.durationSeconds != null && (
           <span className="duration">{formatDuration(video.durationSeconds)}</span>
         )}
@@ -224,12 +254,36 @@ function VideoCard(props: { video: VideoSummary }) {
             <span style={{ width: `${video.progress}%` }} />
           </div>
         )}
-        <button className="ghost copy" onClick={() => void copyLink()}>
-          {copied ? 'Copied!' : 'Copy link'}
-        </button>
+        {video.state === 'failed' ? (
+          <p className="fail-reason" title={video.failureDetail ?? undefined}>
+            {failureText(video.failureReason)}
+          </p>
+        ) : (
+          <button className="ghost copy" onClick={() => void copyLink()}>
+            {copied ? 'Copied!' : 'Copy link'}
+          </button>
+        )}
       </div>
     </li>
   );
+}
+
+/** Friendly text for a transcode failure code (hover shows the raw detail). */
+function failureText(reason: string | null): string {
+  switch (reason) {
+    case 'ffmpeg_not_found':
+      return 'Transcoding failed: ffmpeg not found on the server.';
+    case 'probe_failed':
+      return 'Transcoding failed: the file could not be read.';
+    case 'no_video_stream':
+      return 'Transcoding failed: no video track in this file.';
+    case 'poster_failed':
+      return 'Transcoding failed while generating the poster.';
+    case 'encode_failed':
+      return 'Transcoding failed while encoding this video.';
+    default:
+      return 'Transcoding failed.';
+  }
 }
 
 function formatDuration(totalSeconds: number): string {

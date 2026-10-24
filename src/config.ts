@@ -36,6 +36,10 @@ export interface Config {
    * tests, or in dev where Vite serves the SPA) the server exposes only the API.
    */
   webDistDir: string | undefined;
+  /** `ffmpeg` binary to shell out to for transcoding. */
+  ffmpegPath: string;
+  /** `ffprobe` binary to shell out to for probing Sources. */
+  ffprobePath: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -50,6 +54,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     sessionSecret: env.SESSION_SECRET || undefined,
     cookieSecure: env.COOKIE_SECURE === 'true',
     webDistDir: env.WEB_DIST_DIR || undefined,
+    ffmpegPath: env.FFMPEG_PATH || 'ffmpeg',
+    ffprobePath: env.FFPROBE_PATH || 'ffprobe',
   };
 }
 

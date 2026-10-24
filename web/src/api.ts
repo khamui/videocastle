@@ -61,8 +61,23 @@ export interface VideoSummary {
   state: 'processing' | 'ready' | 'failed';
   progress: number;
   durationSeconds: number | null;
+  failureReason: string | null;
+  failureDetail: string | null;
   shareUrl: string;
   createdAt: number;
+}
+
+export interface TranscodingStatus {
+  available: boolean;
+  version: string | null;
+}
+
+/** Whether transcoding (ffmpeg) is usable, for the Dashboard's availability banner. */
+export async function getStatus(): Promise<TranscodingStatus> {
+  const res = await fetch('/api/status', { credentials: 'same-origin' });
+  if (!res.ok) throw new Error('Could not load status');
+  const data = (await res.json()) as { transcoding: TranscodingStatus };
+  return data.transcoding;
 }
 
 /** The Operator's Library, newest first. */
@@ -93,6 +108,9 @@ export async function uploadVideo(input: {
     credentials: 'same-origin',
     body: form,
   });
+  if (res.status === 503) {
+    throw new Error('Transcoding is unavailable (ffmpeg not found on the server).');
+  }
   if (!res.ok) throw new Error('Upload failed');
   const data = (await res.json()) as { video: VideoSummary };
   return data.video;
