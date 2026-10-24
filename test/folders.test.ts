@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildTestApp, type TestApp } from './helpers';
 import { setupOperator, uploadVideo } from './support';
@@ -155,5 +157,78 @@ describe('organizing Videos into Folders', () => {
     const badVideo = await moveVideo(app, jar, 'nope-video', null);
     expect(badVideo.statusCode).toBe(404);
     expect(badVideo.json()).toMatchObject({ error: 'video_not_found' });
+  });
+});
+
+describe('deleting a Folder with a choice', () => {
+  function deleteFolder(
+    app: TestApp['app'],
+    jar: Record<string, string>,
+    slug: string,
+    videos?: 'delete' | 'keep',
+  ) {
+    const query = videos ? `?videos=${videos}` : '';
+    return app.inject({ method: 'DELETE', url: `/api/folders/${slug}${query}`, cookies: jar });
+  }
+
+  it('requires an explicit choice — no default that could silently delete Videos', async () => {
+    const { app, jar } = await signedIn();
+    const folder = (await createFolder(app, jar, 'Trips')).json().folder;
+
+    const res = await deleteFolder(app, jar, folder.slug);
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: 'missing_videos_choice' });
+
+    const bad = await deleteFolder(app, jar, folder.slug, 'whoops' as 'delete');
+    expect(bad.statusCode).toBe(400);
+
+    // The Folder is untouched after a refused call.
+    const still = await app.inject({ method: 'GET', url: `/api/folders/${folder.slug}`, cookies: jar });
+    expect(still.statusCode).toBe(200);
+  });
+
+  it('"delete" purges the Folder and every Video in it (rows, media, and links)', async () => {
+    const { app, jar, config, worker } = await signedIn();
+    const folder = (await createFolder(app, jar, 'Trips')).json().folder;
+    const inside = await upload(app, jar, 'Beach');
+    const loose = await upload(app, jar, 'Loose'); // stays at the root, must survive
+    await moveVideo(app, jar, inside, folder.slug);
+    await worker.idle(); // let transcoding finish so the purge isn't racing it
+
+    const res = await deleteFolder(app, jar, folder.slug, 'delete');
+    expect(res.statusCode).toBe(204);
+
+    // Folder gone, contained Video gone (its /v link no longer resolves)…
+    expect((await app.inject({ method: 'GET', url: `/api/folders/${folder.slug}`, cookies: jar })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'GET', url: `/api/watch/${inside}` })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'GET', url: `/api/videos/${inside}`, cookies: jar }) ).statusCode).toBe(404);
+    // …its media directory is purged…
+    expect(existsSync(join(config.mediaDir, '1'))).toBe(false);
+    // …and the untouched root Video is still there.
+    const remaining = await app.inject({ method: 'GET', url: '/api/videos', cookies: jar });
+    expect(remaining.json().videos.map((v: { slug: string }) => v.slug)).toEqual([loose]);
+  });
+
+  it('"keep" removes only the Folder, moving its Videos to the Library root with links intact', async () => {
+    const { app, jar } = await signedIn();
+    const folder = (await createFolder(app, jar, 'Trips')).json().folder;
+    const inside = await upload(app, jar, 'Beach');
+    await moveVideo(app, jar, inside, folder.slug);
+
+    const res = await deleteFolder(app, jar, folder.slug, 'keep');
+    expect(res.statusCode).toBe(204);
+
+    // Folder gone…
+    expect((await app.inject({ method: 'GET', url: `/api/folders/${folder.slug}`, cookies: jar })).statusCode).toBe(404);
+    // …but the Video survives, now at the Library root, with a working link.
+    const list = await app.inject({ method: 'GET', url: '/api/videos', cookies: jar });
+    expect(list.json().videos[0]).toMatchObject({ slug: inside, folderSlug: null });
+  });
+
+  it('returns a technical 404 when deleting an unknown Folder', async () => {
+    const { app, jar } = await signedIn();
+    const res = await deleteFolder(app, jar, 'nope', 'keep');
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toMatchObject({ error: 'folder_not_found' });
   });
 });

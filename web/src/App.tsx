@@ -5,6 +5,7 @@ import {
   clearFolderPassword,
   clearVideoPassword,
   createFolder,
+  deleteFolder,
   deleteVideo,
   getMe,
   getNeedsSetup,
@@ -341,6 +342,23 @@ function FolderCard(props: {
   const { folder } = props;
   const [copied, setCopied] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  // Deleting a Folder is a choice, not a yes/no: reveal both options inline
+  // before anything happens (spec: story 31 — present both options before acting).
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  async function remove(mode: 'delete' | 'keep'): Promise<void> {
+    setActionError(null);
+    setDeleting(true);
+    try {
+      await deleteFolder(folder.slug, mode);
+      props.onChanged();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Could not delete Folder');
+      setDeleting(false);
+      setConfirmingDelete(false);
+    }
+  }
 
   async function togglePassword(): Promise<void> {
     setActionError(null);
@@ -432,17 +450,52 @@ function FolderCard(props: {
           Link expires {new Date(folder.expiresAt).toLocaleString()}
         </p>
       )}
-      <div className="video-actions folder-actions">
-        <button className="ghost copy" onClick={() => void copyLink()}>
-          {copied ? 'Copied!' : 'Copy link'}
-        </button>
-        <button className="ghost password" onClick={() => void togglePassword()}>
-          {folder.protected ? 'Remove password' : 'Set password'}
-        </button>
-        <button className="ghost expiry" onClick={() => void editExpiry()}>
-          {folder.expiresAt != null ? 'Edit expiry' : 'Set expiry'}
-        </button>
-      </div>
+      {confirmingDelete ? (
+        <div className="folder-delete-confirm">
+          <p className="muted">
+            Delete “{folder.name}”? Choose what happens to its {folder.videoCount}{' '}
+            video{folder.videoCount === 1 ? '' : 's'}:
+          </p>
+          <div className="video-actions folder-actions">
+            <button
+              className="ghost danger"
+              onClick={() => void remove('delete')}
+              disabled={deleting}
+            >
+              Delete folder &amp; its videos
+            </button>
+            <button
+              className="ghost"
+              onClick={() => void remove('keep')}
+              disabled={deleting}
+            >
+              Delete folder only (keep videos)
+            </button>
+            <button
+              className="ghost"
+              onClick={() => setConfirmingDelete(false)}
+              disabled={deleting}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="video-actions folder-actions">
+          <button className="ghost copy" onClick={() => void copyLink()}>
+            {copied ? 'Copied!' : 'Copy link'}
+          </button>
+          <button className="ghost password" onClick={() => void togglePassword()}>
+            {folder.protected ? 'Remove password' : 'Set password'}
+          </button>
+          <button className="ghost expiry" onClick={() => void editExpiry()}>
+            {folder.expiresAt != null ? 'Edit expiry' : 'Set expiry'}
+          </button>
+          <button className="ghost danger delete" onClick={() => setConfirmingDelete(true)}>
+            Delete
+          </button>
+        </div>
+      )}
       {actionError && <p className="error">{actionError}</p>}
     </li>
   );

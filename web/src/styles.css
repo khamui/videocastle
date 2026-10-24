@@ -399,6 +399,11 @@ button.ghost {
   flex-wrap: wrap;
 }
 
+.folder-delete-confirm p {
+  font-size: 0.8rem;
+  margin: 0 0 8px;
+}
+
 .pill.expired {
   background: rgba(255, 107, 107, 0.15);
   color: var(--error);

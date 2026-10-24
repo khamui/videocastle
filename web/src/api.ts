@@ -151,6 +151,23 @@ export async function createFolder(name: string): Promise<FolderSummary> {
   return data.folder;
 }
 
+/**
+ * Deletes a Folder. `mode` chooses what happens to its Videos (ADR-0006):
+ * `'delete'` purges the Folder and every Video in it (media + Share Links);
+ * `'keep'` removes the Folder only and moves its Videos to the Library root,
+ * leaving each Video's own `/v/<slug>` link intact.
+ */
+export async function deleteFolder(
+  slug: string,
+  mode: 'delete' | 'keep',
+): Promise<void> {
+  const res = await fetch(
+    `/api/folders/${encodeURIComponent(slug)}?videos=${mode}`,
+    { method: 'DELETE', credentials: 'same-origin' },
+  );
+  if (!res.ok) throw await operatorError(res, 'Could not delete Folder');
+}
+
 /** Protects a Folder's gallery with a password (stored hashed server-side). */
 export async function setFolderPassword(
   slug: string,
