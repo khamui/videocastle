@@ -1,4 +1,10 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { TranscodeError } from '../src/ports/transcoder';
@@ -250,6 +256,32 @@ describe('retrying a Failed Video', () => {
 
     const list = await app.inject({ method: 'GET', url: '/api/videos', cookies: jar });
     expect(list.json().videos[0]).toMatchObject({ state: 'ready', progress: 100 });
+  });
+
+  it('purges a partial Rendition before re-queuing, keeping the Source', async () => {
+    const { app, jar, transcoder, worker, config } = await signedIn();
+    await uploadFailed(app, jar, transcoder, worker);
+
+    // Simulate the debris a failed real transcode can leave behind: a partial
+    // Rendition and Poster in the Video's dir, alongside the retained Source.
+    const [id] = readdirSync(config.mediaDir);
+    const dir = join(config.mediaDir, id!);
+    mkdirSync(join(dir, 'rendition'), { recursive: true });
+    writeFileSync(join(dir, 'rendition', 'seg_000.ts'), 'partial');
+    writeFileSync(join(dir, 'rendition', 'index.m3u8'), 'partial');
+    writeFileSync(join(dir, 'poster.jpg'), 'partial');
+
+    const retry = await app.inject({
+      method: 'POST',
+      url: '/api/videos/slug-1/retry',
+      cookies: jar,
+    });
+    expect(retry.statusCode).toBe(200);
+
+    // The partial Rendition and Poster are gone; the Source is untouched.
+    expect(existsSync(join(dir, 'rendition'))).toBe(false);
+    expect(existsSync(join(dir, 'poster.jpg'))).toBe(false);
+    expect(readFileSync(join(dir, 'source'), 'utf8')).toBe('bytes');
   });
 
   it('refuses to retry a Video that is not Failed (409, technical reason)', async () => {

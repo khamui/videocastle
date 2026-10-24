@@ -158,6 +158,10 @@ export async function registerVideoRoutes(
         });
       }
 
+      // Purge any partial Rendition/Poster the failed run left so the retry
+      // transcodes into a clean output dir (the retained Source is kept).
+      await store.clearRendition(video.id);
+
       // Read back the re-queued (Processing) Video before enqueuing, so the
       // response reflects the retry regardless of how fast the worker then runs
       // the job (a quick transcoder could otherwise flip the state first).
