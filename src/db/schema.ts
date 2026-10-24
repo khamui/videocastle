@@ -60,6 +60,13 @@ export const videos = sqliteTable('videos', {
    * is open; when set, a Viewer must supply the password before playback.
    */
   passwordHash: text('password_hash'),
+  /**
+   * Optional Share Link expiry, epoch milliseconds. Null means the link never
+   * expires; when set, the link is evaluated against the injected Clock and,
+   * once the instant has passed, the Video is Expired and its link returns the
+   * generic Viewer 404 (ADR-0002). Set it forward again to re-enable the link.
+   */
+  expiresAt: integer('expires_at'),
   /** Short stable failure code (see TranscodeFailureReason); set when Failed. */
   failureReason: text('failure_reason'),
   /** Diagnostic detail for a failure (e.g. trimmed ffmpeg stderr); set when Failed. */

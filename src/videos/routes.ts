@@ -114,13 +114,14 @@ export async function registerVideoRoutes(
     }
 
     worker.enqueue(created.id);
-    return reply.code(201).send({ video: serializeVideo(created) });
+    return reply.code(201).send({ video: serializeVideo(created, clock.now()) });
   });
 
   // The Operator's Library: every Video with its state and transcoding progress.
   app.get('/api/videos', requireOperator, async () => {
+    const now = clock.now();
     const all = await repo.list();
-    return { videos: all.map(serializeVideo) };
+    return { videos: all.map((video) => serializeVideo(video, now)) };
   });
 
   // Retry a Failed Video. The Source was retained through the failure, so this
@@ -163,7 +164,7 @@ export async function registerVideoRoutes(
       await repo.markProcessing(video.id);
       const requeued = await repo.findById(video.id);
       worker.enqueue(video.id);
-      return reply.code(200).send({ video: serializeVideo(requeued ?? video) });
+      return reply.code(200).send({ video: serializeVideo(requeued ?? video, clock.now()) });
     },
   );
 
@@ -212,7 +213,7 @@ export async function registerVideoRoutes(
 
       await repo.setPasswordHash(video.id, await hashPassword(password));
       const updated = await repo.findById(video.id);
-      return reply.code(200).send({ video: serializeVideo(updated ?? video) });
+      return reply.code(200).send({ video: serializeVideo(updated ?? video, clock.now()) });
     },
   );
 
@@ -226,7 +227,39 @@ export async function registerVideoRoutes(
 
       await repo.setPasswordHash(video.id, null);
       const updated = await repo.findById(video.id);
-      return reply.code(200).send({ video: serializeVideo(updated ?? video) });
+      return reply.code(200).send({ video: serializeVideo(updated ?? video, clock.now()) });
+    },
+  );
+
+  // Set, extend, clear, or re-enable a Video's Share Link expiry (spec:
+  // Operator story — expiring links). The body carries `expiresAt` as epoch
+  // milliseconds, or null to never expire. The same call extends an active
+  // link or re-enables an expired one by moving the instant into the future;
+  // the Clock decides expired/not-expired, so this route only persists.
+  app.post<{ Params: { slug: string }; Body: { expiresAt?: unknown } }>(
+    '/api/videos/:slug/expiry',
+    requireOperator,
+    async (request, reply) => {
+      const video = await repo.findBySlug(request.params.slug);
+      if (!video) return videoNotFound(reply, request.params.slug);
+
+      const raw = request.body?.expiresAt;
+      const expiresAt =
+        raw === null || raw === undefined
+          ? null
+          : typeof raw === 'number' && Number.isFinite(raw)
+            ? raw
+            : NaN;
+      if (Number.isNaN(expiresAt)) {
+        return reply.code(400).send({
+          error: 'invalid_expiry',
+          detail: 'expiresAt must be epoch milliseconds (a finite number) or null.',
+        });
+      }
+
+      await repo.setExpiresAt(video.id, expiresAt);
+      const updated = await repo.findById(video.id);
+      return reply.code(200).send({ video: serializeVideo(updated ?? video, clock.now()) });
     },
   );
 }
@@ -260,11 +293,15 @@ export interface VideoView {
   failureDetail: string | null;
   /** Whether a per-Video password gates the Share Link. The hash is never exposed. */
   protected: boolean;
+  /** Share Link expiry (epoch ms), or null when the link never expires. */
+  expiresAt: number | null;
+  /** Whether the link has expired as of now (per the injected Clock). */
+  expired: boolean;
   shareUrl: string;
   createdAt: number;
 }
 
-function serializeVideo(video: Video): VideoView {
+function serializeVideo(video: Video, now: number): VideoView {
   return {
     slug: video.slug,
     title: video.title,
@@ -275,7 +312,14 @@ function serializeVideo(video: Video): VideoView {
     failureReason: video.failureReason,
     failureDetail: video.failureDetail,
     protected: video.passwordHash !== null,
+    expiresAt: video.expiresAt,
+    expired: isExpired(video, now),
     shareUrl: `/v/${video.slug}`,
     createdAt: video.createdAt,
   };
+}
+
+/** Whether a Video's Share Link has expired as of `now` (the injected Clock). */
+export function isExpired(video: Video, now: number): boolean {
+  return video.expiresAt !== null && now >= video.expiresAt;
 }

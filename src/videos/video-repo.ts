@@ -136,6 +136,19 @@ export class VideoRepo {
       .where(eq(videos.id, id));
   }
 
+  /**
+   * Sets or clears a Video's Share Link expiry (epoch milliseconds, or `null`
+   * to never expire). The same call extends an expiry or re-enables an expired
+   * link by moving the instant forward; the repo just persists the value and
+   * leaves the expired/not-expired judgement to the Clock-aware caller.
+   */
+  async setExpiresAt(id: number, expiresAt: number | null): Promise<void> {
+    await this.db
+      .update(videos)
+      .set({ expiresAt })
+      .where(eq(videos.id, id));
+  }
+
   /** Removes a Video row — used to roll back a failed upload before it transcodes. */
   async delete(id: number): Promise<void> {
     await this.db.delete(videos).where(eq(videos.id, id));

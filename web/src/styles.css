@@ -332,9 +332,20 @@ button.ghost {
 }
 
 .delete,
-.password {
+.password,
+.expiry {
   font-size: 0.8rem;
   padding: 7px 11px;
+}
+
+.pill.expired {
+  background: rgba(255, 107, 107, 0.15);
+  color: var(--error);
+}
+
+.expiry-note {
+  font-size: 0.75rem;
+  margin: 0 0 8px;
 }
 
 .pill.protected {

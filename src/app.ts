@@ -112,6 +112,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   await registerWatchRoutes(app, {
     repo: videoRepo,
     store: mediaStore,
+    clock: deps.clock,
     cookieSecure: deps.config.cookieSecure,
   });
 

@@ -82,6 +82,10 @@ export interface VideoSummary {
   failureDetail: string | null;
   /** Whether a per-Video password gates the Share Link. */
   protected: boolean;
+  /** Share Link expiry (epoch ms), or null when it never expires. */
+  expiresAt: number | null;
+  /** Whether the link has expired as of now (server-evaluated). */
+  expired: boolean;
   shareUrl: string;
   createdAt: number;
 }
@@ -183,6 +187,26 @@ export async function setVideoPassword(
     body: JSON.stringify({ password }),
   });
   if (!res.ok) throw await operatorError(res, 'Could not set password');
+  const data = (await res.json()) as { video: VideoSummary };
+  return data.video;
+}
+
+/**
+ * Sets, extends, clears, or re-enables a Video's Share Link expiry. Pass epoch
+ * milliseconds to expire at that instant, or null to never expire. Returns the
+ * updated Video (with a server-evaluated `expired` flag).
+ */
+export async function setVideoExpiry(
+  slug: string,
+  expiresAt: number | null,
+): Promise<VideoSummary> {
+  const res = await fetch(`/api/videos/${encodeURIComponent(slug)}/expiry`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ expiresAt }),
+  });
+  if (!res.ok) throw await operatorError(res, 'Could not update expiry');
   const data = (await res.json()) as { video: VideoSummary };
   return data.video;
 }

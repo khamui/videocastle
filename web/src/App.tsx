@@ -9,6 +9,7 @@ import {
   listVideos,
   retryVideo,
   setup,
+  setVideoExpiry,
   setVideoPassword,
   signIn,
   signOut,
@@ -245,7 +246,7 @@ function VideoCard(props: { video: VideoSummary; onChanged: () => void }) {
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   async function retry(): Promise<void> {
     setRetryError(null);
@@ -261,7 +262,7 @@ function VideoCard(props: { video: VideoSummary; onChanged: () => void }) {
   }
 
   async function togglePassword(): Promise<void> {
-    setDeleteError(null);
+    setActionError(null);
     try {
       if (video.protected) {
         if (!window.confirm(`Remove the password on “${video.title}”? Anyone with the link will be able to watch it.`)) {
@@ -275,7 +276,40 @@ function VideoCard(props: { video: VideoSummary; onChanged: () => void }) {
       }
       props.onChanged();
     } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : 'Could not update password');
+      setActionError(err instanceof Error ? err.message : 'Could not update password');
+    }
+  }
+
+  async function editExpiry(): Promise<void> {
+    setActionError(null);
+    // Minimal control: expiry is entered as whole days from now. Blank clears
+    // it (never expires); 0 expires the link immediately. The server stores the
+    // absolute instant and evaluates it against its own Clock.
+    const current = video.expiresAt
+      ? `Currently expires ${new Date(video.expiresAt).toLocaleString()}.\n\n`
+      : '';
+    const answer = window.prompt(
+      `${current}Expire “${video.title}” in how many days from now? ` +
+        `Leave blank to clear the expiry; enter 0 to expire now.`,
+    );
+    if (answer === null) return; // cancelled
+    const trimmed = answer.trim();
+    let expiresAt: number | null;
+    if (trimmed.length === 0) {
+      expiresAt = null;
+    } else {
+      const days = Number(trimmed);
+      if (!Number.isFinite(days) || days < 0) {
+        setActionError('Enter a number of days (0 or more), or leave blank to clear.');
+        return;
+      }
+      expiresAt = Date.now() + days * 24 * 60 * 60 * 1000;
+    }
+    try {
+      await setVideoExpiry(video.slug, expiresAt);
+      props.onChanged();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Could not update expiry');
     }
   }
 
@@ -288,13 +322,13 @@ function VideoCard(props: { video: VideoSummary; onChanged: () => void }) {
         `Share Link stops working immediately. This can’t be undone.`,
     );
     if (!confirmed) return;
-    setDeleteError(null);
+    setActionError(null);
     setDeleting(true);
     try {
       await deleteVideo(video.slug);
       props.onChanged();
     } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : 'Delete failed');
+      setActionError(err instanceof Error ? err.message : 'Delete failed');
       setDeleting(false);
     }
   }
@@ -333,8 +367,18 @@ function VideoCard(props: { video: VideoSummary; onChanged: () => void }) {
               🔒
             </span>
           )}
+          {video.expired && (
+            <span className="pill expired" title="The Share Link has expired">
+              expired
+            </span>
+          )}
           <span className={`pill ${video.state}`}>{video.state}</span>
         </div>
+        {video.expiresAt != null && !video.expired && (
+          <p className="muted expiry-note">
+            Link expires {new Date(video.expiresAt).toLocaleString()}
+          </p>
+        )}
         {video.description && <p className="muted video-desc">{video.description}</p>}
         {video.state === 'processing' && (
           <div className="prog">
@@ -363,6 +407,9 @@ function VideoCard(props: { video: VideoSummary; onChanged: () => void }) {
           <button className="ghost password" onClick={() => void togglePassword()}>
             {video.protected ? 'Remove password' : 'Set password'}
           </button>
+          <button className="ghost expiry" onClick={() => void editExpiry()}>
+            {video.expiresAt != null ? 'Edit expiry' : 'Set expiry'}
+          </button>
           <button
             className="ghost danger delete"
             onClick={() => void remove()}
@@ -372,7 +419,7 @@ function VideoCard(props: { video: VideoSummary; onChanged: () => void }) {
           </button>
         </div>
         {retryError && <p className="error">{retryError}</p>}
-        {deleteError && <p className="error">{deleteError}</p>}
+        {actionError && <p className="error">{actionError}</p>}
       </div>
     </li>
   );
