@@ -2,11 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import { WatchPage } from './WatchPage';
 import {
   clearVideoPassword,
+  createFolder,
   deleteVideo,
   getMe,
   getNeedsSetup,
   getStatus,
+  listFolders,
   listVideos,
+  moveVideoToFolder,
   retryVideo,
   setup,
   setVideoExpiry,
@@ -14,6 +17,7 @@ import {
   signIn,
   signOut,
   uploadVideo,
+  type FolderSummary,
   type OperatorSummary,
   type TranscodingStatus,
   type VideoSummary,
@@ -100,13 +104,21 @@ function Dashboard(props: {
   onSignOut: () => Promise<void>;
 }) {
   const [videos, setVideos] = useState<VideoSummary[] | null>(null);
+  const [folders, setFolders] = useState<FolderSummary[]>([]);
   const [status, setStatus] = useState<TranscodingStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Which Folder is open, or null for the Library root (Folders + unfiled Videos).
+  const [openFolder, setOpenFolder] = useState<string | null>(null);
 
   async function refresh(): Promise<void> {
     try {
-      const [vids, stat] = await Promise.all([listVideos(), getStatus()]);
+      const [vids, flds, stat] = await Promise.all([
+        listVideos(),
+        listFolders(),
+        getStatus(),
+      ]);
       setVideos(vids);
+      setFolders(flds);
       setStatus(stat);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load the Library');
@@ -125,10 +137,27 @@ function Dashboard(props: {
     return () => clearInterval(id);
   }, [anyProcessing]);
 
+  async function newFolder(): Promise<void> {
+    const name = window.prompt('Name the new Folder:');
+    if (name === null || name.trim().length === 0) return;
+    setError(null);
+    try {
+      await createFolder(name.trim());
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not create Folder');
+    }
+  }
+
+  // The Videos shown depends on where we are: inside a Folder, only its Videos;
+  // at the root, only the unfiled ones (Folders are listed separately).
+  const shown = (videos ?? []).filter((v) => v.folderSlug === openFolder);
+  const current = folders.find((f) => f.slug === openFolder) ?? null;
+
   return (
     <main className="library">
       <header className="library-head">
-        <h1>Library</h1>
+        <h1>{openFolder ? current?.name ?? 'Folder' : 'Library'}</h1>
         <div className="library-head-right">
           <span className="muted">{props.operator.username}</span>
           <button className="ghost" onClick={() => void props.onSignOut()}>
@@ -136,6 +165,12 @@ function Dashboard(props: {
           </button>
         </div>
       </header>
+
+      {openFolder ? (
+        <button className="ghost back" onClick={() => setOpenFolder(null)}>
+          ← Back to Library
+        </button>
+      ) : null}
 
       {status && !status.available && (
         <div className="banner">
@@ -154,18 +189,53 @@ function Dashboard(props: {
 
       {error && <p className="error">{error}</p>}
 
+      {/* Folders live in the Library root alongside the unfiled Videos. */}
+      {!openFolder && (
+        <section className="folders-head">
+          <h2>Folders</h2>
+          <button className="ghost" onClick={() => void newFolder()}>
+            New folder
+          </button>
+        </section>
+      )}
+      {!openFolder &&
+        (folders.length === 0 ? (
+          <p className="placeholder">No Folders yet.</p>
+        ) : (
+          <ul className="folder-grid">
+            {folders.map((folder) => (
+              <li key={folder.slug}>
+                <button
+                  className="card folder-card"
+                  onClick={() => setOpenFolder(folder.slug)}
+                >
+                  <strong>📁 {folder.name}</strong>
+                  <span className="muted">
+                    {folder.videoCount} video{folder.videoCount === 1 ? '' : 's'}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        ))}
+
+      {!openFolder && <h2>Videos</h2>}
+
       {videos === null ? (
         <p className="muted">Loading…</p>
-      ) : videos.length === 0 ? (
+      ) : shown.length === 0 ? (
         <p className="placeholder">
-          No Videos yet. Upload one above to get a Share Link.
+          {openFolder
+            ? 'This Folder is empty. Move a Video into it from the Library.'
+            : 'No unfiled Videos. Upload one above to get a Share Link.'}
         </p>
       ) : (
         <ul className="video-grid">
-          {videos.map((video) => (
+          {shown.map((video) => (
             <VideoCard
               key={video.slug}
               video={video}
+              folders={folders}
               onChanged={() => void refresh()}
             />
           ))}
@@ -240,7 +310,11 @@ function UploadForm(props: { onUploaded: () => void; disabled?: boolean }) {
   );
 }
 
-function VideoCard(props: { video: VideoSummary; onChanged: () => void }) {
+function VideoCard(props: {
+  video: VideoSummary;
+  folders: FolderSummary[];
+  onChanged: () => void;
+}) {
   const { video } = props;
   const [copied, setCopied] = useState(false);
   const [retrying, setRetrying] = useState(false);
@@ -310,6 +384,38 @@ function VideoCard(props: { video: VideoSummary; onChanged: () => void }) {
       props.onChanged();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Could not update expiry');
+    }
+  }
+
+  async function move(): Promise<void> {
+    setActionError(null);
+    // Minimal picker: list the Folders by number; blank moves to the root.
+    const menu = props.folders
+      .map((f, i) => `${i + 1}. ${f.name}`)
+      .join('\n');
+    const answer = window.prompt(
+      `Move “${video.title}” to which Folder?\n\n${menu || '(no Folders yet)'}\n\n` +
+        `Enter a number, or leave blank to move it to the Library root.`,
+    );
+    if (answer === null) return; // cancelled
+    const trimmed = answer.trim();
+    let folderSlug: string | null;
+    if (trimmed.length === 0) {
+      folderSlug = null;
+    } else {
+      const index = Number(trimmed);
+      const target = props.folders[index - 1];
+      if (!Number.isInteger(index) || !target) {
+        setActionError('Enter one of the listed Folder numbers, or leave blank for the root.');
+        return;
+      }
+      folderSlug = target.slug;
+    }
+    try {
+      await moveVideoToFolder(video.slug, folderSlug);
+      props.onChanged();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Could not move Video');
     }
   }
 
@@ -409,6 +515,9 @@ function VideoCard(props: { video: VideoSummary; onChanged: () => void }) {
           </button>
           <button className="ghost expiry" onClick={() => void editExpiry()}>
             {video.expiresAt != null ? 'Edit expiry' : 'Set expiry'}
+          </button>
+          <button className="ghost move" onClick={() => void move()}>
+            Move
           </button>
           <button
             className="ghost danger delete"

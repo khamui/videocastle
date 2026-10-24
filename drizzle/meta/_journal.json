@@ -36,6 +36,13 @@
       "when": 1792871388952,
       "tag": "0004_fast_eternals",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1792871702314,
+      "tag": "0005_bent_wendigo",
+      "breakpoints": true
     }
   ]
 }

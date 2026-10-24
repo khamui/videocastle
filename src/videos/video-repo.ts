@@ -1,4 +1,4 @@
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, isNull } from 'drizzle-orm';
 import type { Database } from '../db/client';
 import { videos, type Video } from '../db/schema';
 
@@ -147,6 +147,25 @@ export class VideoRepo {
       .update(videos)
       .set({ expiresAt })
       .where(eq(videos.id, id));
+  }
+
+  /**
+   * Moves a Video into a Folder (by the Folder's id) or back to the Library
+   * root (`null`). A Video belongs to at most one Folder — this single column
+   * makes "never in two at once" structural. The caller validates the Folder
+   * exists.
+   */
+  async setFolder(id: number, folderId: number | null): Promise<void> {
+    await this.db.update(videos).set({ folderId }).where(eq(videos.id, id));
+  }
+
+  /** The Videos in a Folder (by id), or the Library root Videos (`null`), newest first. */
+  async listByFolder(folderId: number | null): Promise<Video[]> {
+    return this.db
+      .select()
+      .from(videos)
+      .where(folderId === null ? isNull(videos.folderId) : eq(videos.folderId, folderId))
+      .orderBy(desc(videos.id));
   }
 
   /** Removes a Video row — used to roll back a failed upload before it transcodes. */

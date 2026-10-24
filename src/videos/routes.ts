@@ -9,11 +9,14 @@ import type { MediaStore } from '../media/media-store';
 import type { SessionManager } from '../auth/session';
 import type { TranscodingStatus } from '../system/transcoding-status';
 import type { VideoRepo } from './video-repo';
+import type { FolderRepo } from './folder-repo';
+import type { Folder } from '../db/schema';
 import type { VideoWorker } from './transcode-worker';
 
 export interface VideoRouteOptions extends FastifyPluginOptions {
   session: SessionManager;
   repo: VideoRepo;
+  folderRepo: FolderRepo;
   worker: VideoWorker;
   store: MediaStore;
   slugGenerator: SlugGenerator;
@@ -25,9 +28,16 @@ export async function registerVideoRoutes(
   app: FastifyInstance,
   options: VideoRouteOptions,
 ): Promise<void> {
-  const { session, repo, worker, store, slugGenerator, clock, transcoding } =
+  const { session, repo, folderRepo, worker, store, slugGenerator, clock, transcoding } =
     options;
   const requireOperator = { preHandler: session.requireOperator } as const;
+
+  /** Resolves a Video's owning Folder slug (null when it sits in the root). */
+  async function folderSlugOf(video: Video): Promise<string | null> {
+    if (video.folderId === null) return null;
+    const folder = await folderRepo.findById(video.folderId);
+    return folder?.slug ?? null;
+  }
 
   // Transcoding health, so the Dashboard can warn (and we can gate uploads)
   // when ffmpeg isn't runnable. Re-probes so recovery needs no restart.
@@ -114,15 +124,112 @@ export async function registerVideoRoutes(
     }
 
     worker.enqueue(created.id);
-    return reply.code(201).send({ video: serializeVideo(created, clock.now()) });
+    return reply.code(201).send({
+      video: serializeVideo(created, clock.now(), await folderSlugOf(created)),
+    });
   });
 
-  // The Operator's Library: every Video with its state and transcoding progress.
+  // The Operator's Library: every Video with its state, transcoding progress,
+  // and owning Folder (slug, or null for a root Video).
   app.get('/api/videos', requireOperator, async () => {
     const now = clock.now();
-    const all = await repo.list();
-    return { videos: all.map((video) => serializeVideo(video, now)) };
+    const [all, folderSlugById] = await Promise.all([repo.list(), folderSlugMap()]);
+    return {
+      videos: all.map((video) =>
+        serializeVideo(video, now, video.folderId === null ? null : folderSlugById.get(video.folderId) ?? null),
+      ),
+    };
   });
+
+  /** A folderId → slug lookup, so a batch of Videos resolves their Folder without N queries. */
+  async function folderSlugMap(): Promise<Map<number, string>> {
+    const all = await folderRepo.list();
+    return new Map(all.map((folder) => [folder.id, folder.slug]));
+  }
+
+  // The Operator's Folders, newest first, each with how many Videos it holds.
+  app.get('/api/folders', requireOperator, async () => {
+    const [folders, videos] = await Promise.all([folderRepo.list(), repo.list()]);
+    const counts = new Map<number, number>();
+    for (const video of videos) {
+      if (video.folderId !== null) {
+        counts.set(video.folderId, (counts.get(video.folderId) ?? 0) + 1);
+      }
+    }
+    return {
+      folders: folders.map((folder) => serializeFolder(folder, counts.get(folder.id) ?? 0)),
+    };
+  });
+
+  // Create a Folder with an unguessable `/f/<slug>` Share Link (ADR-0002).
+  app.post<{ Body: { name?: unknown } }>(
+    '/api/folders',
+    requireOperator,
+    async (request, reply) => {
+      const name = typeof request.body?.name === 'string' ? request.body.name.trim() : '';
+      if (name.length === 0) {
+        return reply.code(400).send({
+          error: 'missing_name',
+          detail: 'A non-empty Folder name is required.',
+        });
+      }
+      const folder = await folderRepo.create({
+        slug: slugGenerator.next(),
+        name,
+        createdAt: clock.now(),
+      });
+      return reply.code(201).send({ folder: serializeFolder(folder, 0) });
+    },
+  );
+
+  // Browse a Folder: the Folder and the Videos it holds (spec: Operator can
+  // browse the Videos inside a Folder). Unknown slug → technical 404 (ADR-0007).
+  app.get<{ Params: { slug: string } }>(
+    '/api/folders/:slug',
+    requireOperator,
+    async (request, reply) => {
+      const folder = await folderRepo.findBySlug(request.params.slug);
+      if (!folder) return folderNotFound(reply, request.params.slug);
+
+      const now = clock.now();
+      const videos = await repo.listByFolder(folder.id);
+      return {
+        folder: serializeFolder(folder, videos.length),
+        videos: videos.map((video) => serializeVideo(video, now, folder.slug)),
+      };
+    },
+  );
+
+  // Move a Video into a Folder, or back to the Library root. `folderSlug` names
+  // the destination Folder; null moves it to the root. A Video belongs to at
+  // most one Folder (the move replaces any prior membership — never two at once).
+  app.post<{ Params: { slug: string }; Body: { folderSlug?: unknown } }>(
+    '/api/videos/:slug/folder',
+    requireOperator,
+    async (request, reply) => {
+      const video = await repo.findBySlug(request.params.slug);
+      if (!video) return videoNotFound(reply, request.params.slug);
+
+      const target = request.body?.folderSlug;
+      let folder: Folder | undefined;
+      if (target !== null && target !== undefined) {
+        if (typeof target !== 'string') {
+          return reply.code(400).send({
+            error: 'invalid_folder',
+            detail: 'folderSlug must be a Folder slug string, or null for the Library root.',
+          });
+        }
+        folder = await folderRepo.findBySlug(target);
+        if (!folder) return folderNotFound(reply, target);
+      }
+
+      await repo.setFolder(video.id, folder ? folder.id : null);
+      const updated = (await repo.findById(video.id)) ?? video;
+      return reply.code(200).send({
+        video: serializeVideo(updated, clock.now(), folder ? folder.slug : null),
+      });
+    },
+  );
 
   // Retry a Failed Video. The Source was retained through the failure, so this
   // simply re-queues transcoding (Failed → Processing) against the same file.
@@ -164,7 +271,10 @@ export async function registerVideoRoutes(
       await repo.markProcessing(video.id);
       const requeued = await repo.findById(video.id);
       worker.enqueue(video.id);
-      return reply.code(200).send({ video: serializeVideo(requeued ?? video, clock.now()) });
+      {
+        const v = requeued ?? video;
+        return reply.code(200).send({ video: serializeVideo(v, clock.now(), await folderSlugOf(v)) });
+      }
     },
   );
 
@@ -213,7 +323,10 @@ export async function registerVideoRoutes(
 
       await repo.setPasswordHash(video.id, await hashPassword(password));
       const updated = await repo.findById(video.id);
-      return reply.code(200).send({ video: serializeVideo(updated ?? video, clock.now()) });
+      {
+        const v = updated ?? video;
+        return reply.code(200).send({ video: serializeVideo(v, clock.now(), await folderSlugOf(v)) });
+      }
     },
   );
 
@@ -227,7 +340,10 @@ export async function registerVideoRoutes(
 
       await repo.setPasswordHash(video.id, null);
       const updated = await repo.findById(video.id);
-      return reply.code(200).send({ video: serializeVideo(updated ?? video, clock.now()) });
+      {
+        const v = updated ?? video;
+        return reply.code(200).send({ video: serializeVideo(v, clock.now(), await folderSlugOf(v)) });
+      }
     },
   );
 
@@ -259,7 +375,10 @@ export async function registerVideoRoutes(
 
       await repo.setExpiresAt(video.id, expiresAt);
       const updated = await repo.findById(video.id);
-      return reply.code(200).send({ video: serializeVideo(updated ?? video, clock.now()) });
+      {
+        const v = updated ?? video;
+        return reply.code(200).send({ video: serializeVideo(v, clock.now(), await folderSlugOf(v)) });
+      }
     },
   );
 }
@@ -272,6 +391,17 @@ function videoNotFound(
   return reply.code(404).send({
     error: 'video_not_found',
     detail: `No Video with slug "${slug}".`,
+  });
+}
+
+/** The Operator-facing Folder not-found (ADR-0007: the real reason, naming the slug). */
+function folderNotFound(
+  reply: import('fastify').FastifyReply,
+  slug: string,
+): import('fastify').FastifyReply {
+  return reply.code(404).send({
+    error: 'folder_not_found',
+    detail: `No Folder with slug "${slug}".`,
   });
 }
 
@@ -297,11 +427,17 @@ export interface VideoView {
   expiresAt: number | null;
   /** Whether the link has expired as of now (per the injected Clock). */
   expired: boolean;
+  /** The owning Folder's slug, or null when the Video sits in the Library root. */
+  folderSlug: string | null;
   shareUrl: string;
   createdAt: number;
 }
 
-function serializeVideo(video: Video, now: number): VideoView {
+function serializeVideo(
+  video: Video,
+  now: number,
+  folderSlug: string | null,
+): VideoView {
   return {
     slug: video.slug,
     title: video.title,
@@ -314,8 +450,28 @@ function serializeVideo(video: Video, now: number): VideoView {
     protected: video.passwordHash !== null,
     expiresAt: video.expiresAt,
     expired: isExpired(video, now),
+    folderSlug,
     shareUrl: `/v/${video.slug}`,
     createdAt: video.createdAt,
+  };
+}
+
+/** The public shape of a Folder for the Operator's Library. */
+export interface FolderView {
+  slug: string;
+  name: string;
+  videoCount: number;
+  shareUrl: string;
+  createdAt: number;
+}
+
+function serializeFolder(folder: Folder, videoCount: number): FolderView {
+  return {
+    slug: folder.slug,
+    name: folder.name,
+    videoCount,
+    shareUrl: `/f/${folder.slug}`,
+    createdAt: folder.createdAt,
   };
 }
 
