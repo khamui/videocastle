@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { WatchPage } from './WatchPage';
 import { GalleryPage } from './GalleryPage';
 import {
+  clearFolderPassword,
   clearVideoPassword,
   createFolder,
   deleteVideo,
@@ -12,6 +13,8 @@ import {
   listVideos,
   moveVideoToFolder,
   retryVideo,
+  setFolderExpiry,
+  setFolderPassword,
   setup,
   setVideoExpiry,
   setVideoPassword,
@@ -229,17 +232,12 @@ function Dashboard(props: {
         ) : (
           <ul className="folder-grid">
             {folders.map((folder) => (
-              <li key={folder.slug}>
-                <button
-                  className="card folder-card"
-                  onClick={() => setOpenFolder(folder.slug)}
-                >
-                  <strong>📁 {folder.name}</strong>
-                  <span className="muted">
-                    {folder.videoCount} video{folder.videoCount === 1 ? '' : 's'}
-                  </span>
-                </button>
-              </li>
+              <FolderCard
+                key={folder.slug}
+                folder={folder}
+                onOpen={() => setOpenFolder(folder.slug)}
+                onChanged={() => void refresh()}
+              />
             ))}
           </ul>
         ))}
@@ -332,6 +330,121 @@ function UploadForm(props: { onUploaded: () => void; disabled?: boolean }) {
       />
       {error && <p className="error">{error}</p>}
     </form>
+  );
+}
+
+function FolderCard(props: {
+  folder: FolderSummary;
+  onOpen: () => void;
+  onChanged: () => void;
+}) {
+  const { folder } = props;
+  const [copied, setCopied] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  async function togglePassword(): Promise<void> {
+    setActionError(null);
+    try {
+      if (folder.protected) {
+        if (
+          !window.confirm(
+            `Remove the password on “${folder.name}”? Anyone with the gallery link will be able to browse it.`,
+          )
+        ) {
+          return;
+        }
+        await clearFolderPassword(folder.slug);
+      } else {
+        const password = window.prompt(
+          `Set a password for the folder “${folder.name}”. Viewers unlock the gallery once, then play any video in it.`,
+        );
+        if (password === null || password.trim().length === 0) return;
+        await setFolderPassword(folder.slug, password.trim());
+      }
+      props.onChanged();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Could not update password');
+    }
+  }
+
+  async function editExpiry(): Promise<void> {
+    setActionError(null);
+    const current = folder.expiresAt
+      ? `Currently expires ${new Date(folder.expiresAt).toLocaleString()}.\n\n`
+      : '';
+    const answer = window.prompt(
+      `${current}Expire the folder “${folder.name}” in how many days from now? ` +
+        `Leave blank to clear the expiry; enter 0 to expire now.`,
+    );
+    if (answer === null) return;
+    const trimmed = answer.trim();
+    let expiresAt: number | null;
+    if (trimmed.length === 0) {
+      expiresAt = null;
+    } else {
+      const days = Number(trimmed);
+      if (!Number.isFinite(days) || days < 0) {
+        setActionError('Enter a number of days (0 or more), or leave blank to clear.');
+        return;
+      }
+      expiresAt = Date.now() + days * 24 * 60 * 60 * 1000;
+    }
+    try {
+      await setFolderExpiry(folder.slug, expiresAt);
+      props.onChanged();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Could not update expiry');
+    }
+  }
+
+  async function copyLink(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}${folder.shareUrl}`);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <li className="card folder-card">
+      <button className="folder-open" onClick={props.onOpen}>
+        <span className="folder-name">
+          <strong>📁 {folder.name}</strong>
+          {folder.protected && (
+            <span className="pill protected" title="Password-protected">
+              🔒
+            </span>
+          )}
+          {folder.expired && (
+            <span className="pill expired" title="The gallery link has expired">
+              expired
+            </span>
+          )}
+        </span>
+        <span className="muted">
+          {folder.videoCount} video{folder.videoCount === 1 ? '' : 's'}
+        </span>
+      </button>
+      {folder.expiresAt != null && !folder.expired && (
+        <p className="muted expiry-note">
+          Link expires {new Date(folder.expiresAt).toLocaleString()}
+        </p>
+      )}
+      <div className="video-actions folder-actions">
+        <button className="ghost copy" onClick={() => void copyLink()}>
+          {copied ? 'Copied!' : 'Copy link'}
+        </button>
+        <button className="ghost password" onClick={() => void togglePassword()}>
+          {folder.protected ? 'Remove password' : 'Set password'}
+        </button>
+        <button className="ghost expiry" onClick={() => void editExpiry()}>
+          {folder.expiresAt != null ? 'Edit expiry' : 'Set expiry'}
+        </button>
+      </div>
+      {actionError && <p className="error">{actionError}</p>}
+    </li>
   );
 }
 

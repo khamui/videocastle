@@ -48,4 +48,23 @@ export class FolderRepo {
       .limit(1);
     return rows[0];
   }
+
+  /**
+   * Sets or clears a Folder's password. Pass a scrypt hash to protect the `/f/`
+   * gallery, or `null` to make it open again. Mirrors {@link VideoRepo.setPasswordHash}:
+   * the caller owns hashing; the repo just persists the value.
+   */
+  async setPasswordHash(id: number, passwordHash: string | null): Promise<void> {
+    await this.db.update(folders).set({ passwordHash }).where(eq(folders.id, id));
+  }
+
+  /**
+   * Sets or clears a Folder's Share Link expiry (epoch milliseconds, or `null`
+   * to never expire). Mirrors {@link VideoRepo.setExpiresAt}: the same call
+   * extends or re-enables an expired gallery by moving the instant forward; the
+   * Clock-aware caller decides expired/not-expired.
+   */
+  async setExpiresAt(id: number, expiresAt: number | null): Promise<void> {
+    await this.db.update(folders).set({ expiresAt }).where(eq(folders.id, id));
+  }
 }

@@ -59,14 +59,14 @@ export async function registerWatchRoutes(
   }
 
   /**
-   * Resolves a slug to a *live* Folder for the Viewer. Like {@link liveVideo},
-   * an unknown Folder collapses to undefined so it shares the one generic 404
-   * (ADR-0002 — no existence leak). Folder expiry (its own password/expiry, with
-   * the Folder→Video cascade) arrives in a later ticket; this resolver is where
-   * that expiry check will live, so the collapse-to-404 path is already in place.
+   * Resolves a slug to a *live* Folder for the Viewer: an unknown or expired
+   * Folder collapses to undefined, so both share the one generic 404 (ADR-0002 —
+   * a Viewer can never tell which it is), exactly as {@link liveVideo} does.
    */
   async function liveFolder(slug: string): Promise<Folder | undefined> {
-    return folderRepo.findBySlug(slug);
+    const folder = await folderRepo.findBySlug(slug);
+    if (!folder || isExpired(folder, clock.now())) return undefined;
+    return folder;
   }
 
   /** A live Video, but only when it is Ready to play, else undefined. */
@@ -98,6 +98,39 @@ export async function registerWatchRoutes(
   /** A protected Video is sealed until this request proves it has been unlocked. */
   function sealed(request: FastifyRequest, video: Video): boolean {
     return video.passwordHash !== null && !unlocked(request, video.slug);
+  }
+
+  const folderGrantCookie = (slug: string): string => `vc_folder_${slug}`;
+
+  /**
+   * Whether this request carries a valid unlock grant for the Folder. Like the
+   * Video grant, it is a signed, slug-scoped cookie minted by the Folder
+   * `/unlock`, so unlocking one Folder never opens another.
+   */
+  function folderUnlocked(request: FastifyRequest, slug: string): boolean {
+    const raw = request.cookies[folderGrantCookie(slug)];
+    if (!raw) return false;
+    const unsigned = request.unsignCookie(raw);
+    return unsigned.valid && unsigned.value === 'ok';
+  }
+
+  /** A protected Folder is sealed until this request proves it has been unlocked. */
+  function folderSealed(request: FastifyRequest, folder: Folder): boolean {
+    return folder.passwordHash !== null && !folderUnlocked(request, folder.slug);
+  }
+
+  /**
+   * The Folder→Video cascade (spec: Viewer story 37). Once a Viewer has Folder
+   * access, opening one of its Videos must play without a second prompt — even a
+   * Video that carries its own password. We realise that by minting the Video's
+   * own grant here: the media routes then serve it unchanged, and because this
+   * only ever runs behind proven Folder access, a standalone `/v/<slug>` link
+   * (which never gets here) still enforces the Video's own password (story 39).
+   */
+  function cascadeGrant(reply: FastifyReply, video: Video): void {
+    if (video.passwordHash !== null) {
+      reply.setCookie(grantCookie(video.slug), 'ok', { ...grantOptions, signed: true });
+    }
   }
 
   // The watch view model: enough for the Watch Page to render, never the id or
@@ -169,38 +202,77 @@ export async function registerWatchRoutes(
     },
   );
 
-  // A Folder shared as a tiled gallery (spec: Viewer story 36). A `/f/<slug>`
-  // link resolves to the Folder's name and its playable Videos as tiles, each a
-  // jumping-off point to `/f/<slug>/<vslug>`. Only Ready, non-expired Videos are
-  // tiled — a Processing/Failed/expired Video has nothing a Viewer can watch, so
-  // it stays out of the gallery rather than offering a dead tile. An unknown (or,
-  // later, expired) Folder is the one generic 404 (ADR-0002, no existence leak).
-  app.get<{ Params: { slug: string } }>('/api/watch/folder/:slug', async (request, reply) => {
-    const folder = await liveFolder(request.params.slug);
-    if (!folder) return notFound(reply);
-
+  /** The open gallery view: the Folder's name and its playable Videos as tiles. */
+  async function openGalleryView(folder: Folder) {
     const now = clock.now();
     const tiles = (await repo.listByFolder(folder.id))
       .filter((video) => video.state === 'ready' && !isExpired(video, now))
       .map(serializeTile);
-    return reply.send({ folder: { slug: folder.slug, name: folder.name, videos: tiles } });
+    return { protected: false as const, slug: folder.slug, name: folder.name, videos: tiles };
+  }
+
+  // A Folder shared as a tiled gallery (spec: Viewer story 36). A `/f/<slug>`
+  // link resolves to the Folder's name and its playable Videos as tiles, each a
+  // jumping-off point to `/f/<slug>/<vslug>`. Only Ready, non-expired Videos are
+  // tiled — a Processing/Failed/expired Video has nothing a Viewer can watch, so
+  // it stays out of the gallery rather than offering a dead tile. A protected,
+  // not-yet-unlocked Folder reveals nothing but that it needs a password; an
+  // unknown or expired Folder is the one generic 404 (ADR-0002, no existence leak).
+  app.get<{ Params: { slug: string } }>('/api/watch/folder/:slug', async (request, reply) => {
+    const folder = await liveFolder(request.params.slug);
+    if (!folder) return notFound(reply);
+    if (folderSealed(request, folder)) return reply.send({ folder: { protected: true as const } });
+    return reply.send({ folder: await openGalleryView(folder) });
   });
 
-  // A single Video opened from within its Folder: `/f/<slug>/<vslug>`. The Video
-  // must actually live in this Folder, else the one generic 404 — so a Folder
-  // link can't be used to probe Videos that aren't in it. The view model is
-  // identical to the standalone `/api/watch/:slug` (playback, poster, and unlock
-  // all still run through the Video's own `/api/watch/:vslug/*` routes); the only
-  // difference is the back-to-gallery affordance the Watch Page then shows.
+  // Unlock a protected Folder with its password. On success, mint a signed,
+  // Folder-scoped grant and return the now-open gallery; the grant then cascades
+  // to every Video opened from within the Folder. Responses stay opaque
+  // (ADR-0002 + anti-enumeration): an unknown/expired Folder is the generic 404
+  // and a wrong password a flat 401 — neither reveals what's behind the link.
+  app.post<{ Params: { slug: string }; Body: { password?: unknown } }>(
+    '/api/watch/folder/:slug/unlock',
+    async (request, reply) => {
+      const folder = await liveFolder(request.params.slug);
+      if (!folder) return notFound(reply);
+
+      // No password set: nothing to unlock — just return the open gallery.
+      if (folder.passwordHash === null) {
+        return reply.send({ folder: await openGalleryView(folder) });
+      }
+
+      const password =
+        typeof request.body?.password === 'string' ? request.body.password : '';
+      if (!(await verifyPassword(password, folder.passwordHash))) {
+        return reply.code(401).send({ error: 'incorrect_password' });
+      }
+
+      reply.setCookie(folderGrantCookie(folder.slug), 'ok', { ...grantOptions, signed: true });
+      return reply.send({ folder: await openGalleryView(folder) });
+    },
+  );
+
+  // A single Video opened from within its Folder: `/f/<slug>/<vslug>`. Access is
+  // gated by the *Folder*, not the Video: a locked Folder reports `protected`
+  // (the Viewer unlocks the Folder, never the Video, from here), and once Folder
+  // access is proven it cascades — the Video plays without a second prompt even
+  // if it carries its own password (spec: Viewer story 37). The Video must
+  // actually live in this Folder, else the one generic 404, so a Folder link
+  // can't be used to probe Videos that aren't in it. Playback, poster, and the
+  // (cascaded) grant all run through the Video's own `/api/watch/:vslug/*` routes.
   app.get<{ Params: { slug: string; vslug: string } }>(
     '/api/watch/folder/:slug/:vslug',
     async (request, reply) => {
       const folder = await liveFolder(request.params.slug);
       if (!folder) return notFound(reply);
+      if (folderSealed(request, folder)) {
+        return reply.send({ watch: { state: 'protected' as const } });
+      }
 
       const video = await liveVideo(request.params.vslug);
       if (!video || video.folderId !== folder.id) return notFound(reply);
-      if (sealed(request, video)) return reply.send({ watch: { state: 'protected' as const } });
+
+      cascadeGrant(reply, video);
       return sendWatchView(reply, video);
     },
   );
