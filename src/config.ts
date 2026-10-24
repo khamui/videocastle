@@ -12,6 +12,14 @@ export interface Config {
   dataDir: string;
   /** SQLite database file path. */
   dbPath: string;
+  /** Root directory for persisted media (Sources, Renditions, Posters). */
+  mediaDir: string;
+  /**
+   * Maximum accepted upload size in bytes. Enforced as the multipart file-size
+   * limit so oversized uploads are rejected rather than silently truncated.
+   * Richer cap/disk-full handling is a later ticket; this is the hard ceiling.
+   */
+  maxUploadBytes: number;
   /**
    * Session-signing secret override. When set (via env), it takes precedence
    * over the secret auto-generated and persisted in the database on first run.
@@ -37,6 +45,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     port: parseIntOr(env.PORT, 8080),
     dataDir,
     dbPath: env.DB_PATH ?? join(dataDir, 'videocastle.db'),
+    mediaDir: env.MEDIA_DIR ?? join(dataDir, 'media'),
+    maxUploadBytes: parseIntOr(env.MAX_UPLOAD_BYTES, 2 * 1024 ** 3),
     sessionSecret: env.SESSION_SECRET || undefined,
     cookieSecure: env.COOKIE_SECURE === 'true',
     webDistDir: env.WEB_DIST_DIR || undefined,

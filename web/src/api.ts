@@ -52,3 +52,48 @@ export async function signIn(
 export async function signOut(): Promise<void> {
   await fetch('/api/session', { method: 'DELETE', credentials: 'same-origin' });
 }
+
+/** A Video as the Library sees it. Mirrors the server's VideoView. */
+export interface VideoSummary {
+  slug: string;
+  title: string;
+  description: string | null;
+  state: 'processing' | 'ready' | 'failed';
+  progress: number;
+  durationSeconds: number | null;
+  shareUrl: string;
+  createdAt: number;
+}
+
+/** The Operator's Library, newest first. */
+export async function listVideos(): Promise<VideoSummary[]> {
+  const res = await fetch('/api/videos', { credentials: 'same-origin' });
+  if (!res.ok) throw new Error('Could not load the Library');
+  const data = (await res.json()) as { videos: VideoSummary[] };
+  return data.videos;
+}
+
+/**
+ * Uploads a Video. The title and description fields are appended before the
+ * file so the server knows them by the time the file stream arrives. Resolves
+ * with the created (Processing) Video.
+ */
+export async function uploadVideo(input: {
+  title: string;
+  description: string;
+  file: File;
+}): Promise<VideoSummary> {
+  const form = new FormData();
+  form.append('title', input.title);
+  if (input.description.trim()) form.append('description', input.description);
+  form.append('file', input.file);
+
+  const res = await fetch('/api/videos', {
+    method: 'POST',
+    credentials: 'same-origin',
+    body: form,
+  });
+  if (!res.ok) throw new Error('Upload failed');
+  const data = (await res.json()) as { video: VideoSummary };
+  return data.video;
+}

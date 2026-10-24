@@ -4,7 +4,7 @@ import { loadConfig } from './config';
 import { openDatabase } from './db/client';
 import { systemClock } from './ports/clock';
 import { createSlugGenerator } from './ports/slug';
-import { unimplementedTranscoder } from './ports/transcoder';
+import { ffmpegTranscoder } from './transcode/ffmpeg-transcoder';
 
 /** Production entrypoint: wire the real collaborators and start listening. */
 async function main(): Promise<void> {
@@ -18,8 +18,9 @@ async function main(): Promise<void> {
     db: database.db,
     clock: systemClock,
     slugGenerator: createSlugGenerator(),
-    transcoder: unimplementedTranscoder,
+    transcoder: ffmpegTranscoder,
     config: { ...config, webDistDir },
+    logger: true,
   });
 
   const shutdown = async (signal: string): Promise<void> => {

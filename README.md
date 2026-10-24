@@ -5,9 +5,11 @@ uploads a Video, it is transcoded to streamable HLS, and a Share Link is handed
 out to Viewers. The media stays on the Operator's own server; access is gated
 only by an unguessable link (optionally narrowed by a password and/or expiry).
 
-> **Status:** early. This is the walking skeleton — a running server, the single
-> Operator credential, first-run setup, and sign-in. Uploads, transcoding,
-> sharing, and Folders arrive in later milestones.
+> **Status:** early. The server, the single Operator credential, first-run setup
+> and sign-in are in place, and an Operator can now upload a Video — it streams to
+> disk, transcodes to HLS in the background, and appears in the Library with its
+> state and a copy-able Share Link. Viewer playback, sharing protections, and
+> Folders arrive in later milestones.
 
 ## Stack
 
@@ -20,9 +22,13 @@ TLS-terminating reverse proxy.
 
 ## Develop
 
-Requires Node.js 24+ (for the built-in `node:sqlite` module).
+Requires Node.js 24+ (for the built-in `node:sqlite` module) and `ffmpeg` on
+your PATH (the transcoder shells out to `ffmpeg`/`ffprobe`; without them uploads
+succeed but every transcode lands in Failed). With Nix, `nix-shell` provides
+both:
 
 ```sh
+nix-shell            # Node 24 + ffmpeg on PATH (see shell.nix)
 npm install
 npm run dev:server   # API on http://localhost:8080
 npm run dev:web      # SPA on http://localhost:5173 (proxies /api to :8080)
@@ -54,8 +60,13 @@ restarts. Configure via environment variables — see `.env.example`.
 | `HOST`           | `0.0.0.0` | Listen address.                                                |
 | `PORT`           | `8080`    | Listen port.                                                   |
 | `DATA_DIR`       | `./data`  | Root for SQLite and media; mount a volume here in production.  |
+| `MEDIA_DIR`      | `$DATA_DIR/media` | Where Sources, Renditions, and Posters are written.   |
+| `MAX_UPLOAD_BYTES` | `2147483648` | Largest accepted upload (bytes); default ~2 GB.          |
 | `SESSION_SECRET` | _(auto)_  | Session-signing secret; generated and persisted on first run.  |
 | `COOKIE_SECURE`  | `false`   | Set `true` when a reverse proxy terminates TLS.                |
+
+Transcoding shells out to `ffmpeg` (bundled in the Docker image). For local
+`npm run dev:server`, install `ffmpeg` on your PATH.
 
 ## License
 

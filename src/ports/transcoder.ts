@@ -3,18 +3,22 @@
  *
  * Transcoding a Source into its streamable HLS Rendition (plus a Poster) is
  * reached only through this interface, so the real `ffmpeg`-backed
- * implementation is swappable for a fake that drives the Processing → Ready /
- * Failed lifecycle synchronously in tests (spec: Testing Decisions).
- *
- * The concrete `ffmpeg` implementation and the fields of these types are
- * fleshed out in the upload/transcode ticket (#2); this port is defined here so
- * the walking skeleton can wire and inject it from the start.
+ * implementation (src/transcode/ffmpeg-transcoder.ts) is swappable for a fake
+ * that drives the Processing → Ready / Failed lifecycle synchronously in tests
+ * (spec: Testing Decisions).
  */
 export interface TranscodeRequest {
   /** Absolute path to the uploaded Source file on disk. */
   sourcePath: string;
   /** Directory into which the HLS Rendition and Poster should be written. */
   outputDir: string;
+  /**
+   * Optional progress sink, called with an integer percentage (0–100) as
+   * transcoding advances, so the Library can show progress. The worker returns
+   * the persistence promise, so an implementation may `await` it to apply
+   * back-pressure; the real `ffmpeg` transcoder does not need to.
+   */
+  onProgress?: (percent: number) => void | Promise<void>;
 }
 
 export interface TranscodeResult {
@@ -29,16 +33,3 @@ export interface TranscodeResult {
 export interface Transcoder {
   transcode(request: TranscodeRequest): Promise<TranscodeResult>;
 }
-
-/**
- * Placeholder real transcoder. The `ffmpeg`-backed implementation lands in the
- * upload/transcode ticket (#2); until then the walking skeleton wires this so
- * the port is always injected, and it fails loudly if transcoding is attempted.
- */
-export const unimplementedTranscoder: Transcoder = {
-  transcode() {
-    return Promise.reject(
-      new Error('Transcoder not implemented yet (see ticket #2).'),
-    );
-  },
-};
