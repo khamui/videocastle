@@ -1,5 +1,4 @@
 import { createWriteStream } from 'node:fs';
-import { rm } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
 import type { Clock } from '../ports/clock';
@@ -99,7 +98,7 @@ export async function registerVideoRoutes(
       // ticket; this is the minimum that keeps a failed upload from leaving junk.)
       if (created) {
         await repo.delete(created.id);
-        await rm(store.videoDir(created.id), { recursive: true, force: true });
+        await store.removeVideo(created.id);
       }
       request.log.error(err, 'upload failed');
       // ADR-0007: the Operator owns the box — hand them the real cause.
@@ -169,6 +168,34 @@ export async function registerVideoRoutes(
       const requeued = await repo.findById(video.id);
       worker.enqueue(video.id);
       return reply.code(200).send({ video: serializeVideo(requeued ?? video) });
+    },
+  );
+
+  // Delete a Video: purge its Source and Rendition and kill its Share Link, so
+  // private footage is really gone (spec: Operator story 19). The row is removed
+  // first — that alone invalidates the link immediately (the slug stops
+  // resolving) — then the media directory is purged from disk. Irreversible by
+  // design; the Dashboard confirms before calling this (story 20).
+  //
+  // A deleted slug collapses into the same generic Viewer 404 as an unknown one
+  // (ADR-0002, no existence leak) precisely because the row is gone: the Viewer
+  // surface can no longer tell a deleted link from one that never existed.
+  app.delete<{ Params: { slug: string } }>(
+    '/api/videos/:slug',
+    requireOperator,
+    async (request, reply) => {
+      const video = await repo.findBySlug(request.params.slug);
+      if (!video) {
+        // Operator surface (ADR-0007): the real reason, not a genericised one.
+        return reply.code(404).send({
+          error: 'video_not_found',
+          detail: `No Video with slug "${request.params.slug}".`,
+        });
+      }
+
+      await repo.delete(video.id);
+      await store.removeVideo(video.id);
+      return reply.code(204).send();
     },
   );
 }

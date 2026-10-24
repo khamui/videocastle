@@ -349,6 +349,127 @@ describe('retrying a Failed Video', () => {
   });
 });
 
+describe('deleting a Video', () => {
+  it('purges the Source and Rendition from disk and removes the Video', async () => {
+    const { app, jar, worker, config } = await signedIn();
+    await uploadVideo(app, jar, {
+      fields: { title: 'Clip' },
+      file: { fieldname: 'file', filename: 'clip.mp4', content: 'bytes' },
+    });
+    await worker.idle();
+
+    // The debris of a finished transcode: the Video's dir holds a Source, a
+    // Rendition, and a Poster — all of which deletion must purge.
+    const [id] = readdirSync(config.mediaDir);
+    const dir = join(config.mediaDir, id!);
+    mkdirSync(join(dir, 'rendition'), { recursive: true });
+    writeFileSync(join(dir, 'rendition', 'index.m3u8'), 'playlist');
+    writeFileSync(join(dir, 'poster.jpg'), 'poster');
+
+    const del = await app.inject({
+      method: 'DELETE',
+      url: '/api/videos/slug-1',
+      cookies: jar,
+    });
+    expect(del.statusCode).toBe(204);
+
+    // The whole Video directory is gone (Source + Rendition + Poster purged)…
+    expect(existsSync(dir)).toBe(false);
+    // …and the Video no longer exists in the Library.
+    const list = await app.inject({ method: 'GET', url: '/api/videos', cookies: jar });
+    expect(list.json().videos).toHaveLength(0);
+  });
+
+  it('kills the Share Link at once: the deleted link 404s like an unknown slug', async () => {
+    const { app, jar, worker } = await signedIn();
+    await uploadVideo(app, jar, {
+      fields: { title: 'Clip' },
+      file: { fieldname: 'file', filename: 'clip.mp4', content: 'bytes' },
+    });
+    await worker.idle();
+
+    // An unknown slug's generic 404, captured before the delete for comparison.
+    const unknown = await app.inject({ method: 'GET', url: '/api/watch/does-not-exist' });
+
+    await app.inject({ method: 'DELETE', url: '/api/videos/slug-1', cookies: jar });
+
+    // The deleted link now resolves to the identical generic 404 (ADR-0002: no
+    // existence leak — a deleted link is indistinguishable from one that never
+    // existed).
+    const deleted = await app.inject({ method: 'GET', url: '/api/watch/slug-1' });
+    expect(deleted.statusCode).toBe(404);
+    expect(deleted.json()).toEqual(unknown.json());
+    expect(deleted.json()).toEqual({ error: 'not_found' });
+  });
+
+  it('purges media an in-flight transcode writes after a mid-Processing delete', async () => {
+    const { app, jar, transcoder, worker, config } = await signedIn();
+    transcoder.auto = false; // hold the transcode open so we can delete mid-flight
+
+    await uploadVideo(app, jar, {
+      fields: { title: 'Clip' },
+      file: { fieldname: 'file', filename: 'clip.mp4', content: 'bytes' },
+    });
+    await waitFor(() => transcoder.requests.length === 1);
+
+    const [id] = readdirSync(config.mediaDir);
+    const dir = join(config.mediaDir, id!);
+
+    // Delete while the Video is still Processing: the link dies and what's on
+    // disk now is purged at once.
+    const del = await app.inject({
+      method: 'DELETE',
+      url: '/api/videos/slug-1',
+      cookies: jar,
+    });
+    expect(del.statusCode).toBe(204);
+
+    // The transcode was still running and writes its Rendition into the dir
+    // *after* the delete — exactly the orphan the "really gone" guarantee must
+    // not leave behind (spec: any ──delete──▶ gone).
+    mkdirSync(join(dir, 'rendition'), { recursive: true });
+    writeFileSync(join(dir, 'rendition', 'index.m3u8'), 'orphaned');
+    writeFileSync(join(dir, 'poster.jpg'), 'orphaned');
+    await transcoder.complete();
+    await worker.idle();
+
+    // The worker swept the orphaned output once the transcode finished: nothing
+    // of the deleted Video survives on disk.
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  it('returns 404 with the real reason for an unknown slug (ADR-0007)', async () => {
+    const { app, jar } = await signedIn();
+
+    const del = await app.inject({
+      method: 'DELETE',
+      url: '/api/videos/does-not-exist',
+      cookies: jar,
+    });
+
+    expect(del.statusCode).toBe(404);
+    // Operator surface: the technical reason, not a genericised message.
+    expect(del.json()).toMatchObject({ error: 'video_not_found' });
+    expect(del.json().detail).toContain('does-not-exist');
+  });
+
+  it('requires an authenticated Operator', async () => {
+    const { app, jar, worker } = await signedIn();
+    await uploadVideo(app, jar, {
+      fields: { title: 'Clip' },
+      file: { fieldname: 'file', filename: 'clip.mp4', content: 'bytes' },
+    });
+    await worker.idle();
+
+    const del = await app.inject({ method: 'DELETE', url: '/api/videos/slug-1' });
+    expect(del.statusCode).toBe(401);
+
+    // Nothing was deleted.
+    const list = await app.inject({ method: 'GET', url: '/api/videos', cookies: jar });
+    expect(list.json().videos).toHaveLength(1);
+  });
+});
+
 describe('transcoding availability', () => {
   it('reports transcoding available with a version in the normal case', async () => {
     const { app, jar } = await signedIn();

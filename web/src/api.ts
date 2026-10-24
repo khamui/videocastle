@@ -164,6 +164,20 @@ export async function retryVideo(slug: string): Promise<VideoSummary> {
 }
 
 /**
+ * Deletes a Video: purges its Source and Rendition on the server and kills its
+ * Share Link at once (the slug stops resolving, so the link collapses into the
+ * generic Viewer 404). Irreversible — the Dashboard confirms before calling.
+ * Surfaces the server's technical reason on failure (ADR-0007).
+ */
+export async function deleteVideo(slug: string): Promise<void> {
+  const res = await fetch(`/api/videos/${encodeURIComponent(slug)}`, {
+    method: 'DELETE',
+    credentials: 'same-origin',
+  });
+  if (!res.ok) throw await operatorError(res, 'Delete failed');
+}
+
+/**
  * Uploads a Video. The title and description fields are appended before the
  * file so the server knows them by the time the file stream arrives. Resolves
  * with the created (Processing) Video.

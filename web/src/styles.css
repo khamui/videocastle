@@ -307,21 +307,20 @@ button.ghost {
   transition: width 0.4s;
 }
 
+.video-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
 .copy {
-  align-self: flex-start;
   font-size: 0.8rem;
   padding: 7px 11px;
 }
 
-.fail {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  align-items: flex-start;
-}
-
 .fail-reason {
-  margin: 0;
+  margin: 0 0 8px;
   font-size: 0.8rem;
   color: var(--error);
   cursor: help;
@@ -330,6 +329,20 @@ button.ghost {
 .retry {
   font-size: 0.8rem;
   padding: 7px 11px;
+}
+
+.delete {
+  font-size: 0.8rem;
+  padding: 7px 11px;
+}
+
+button.ghost.danger {
+  color: var(--error);
+  border-color: rgba(255, 107, 107, 0.4);
+}
+
+button.ghost.danger:hover:not(:disabled) {
+  background: rgba(255, 107, 107, 0.12);
 }
 
 /* --- Watch Page (Viewer surface) --- */

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { WatchPage } from './WatchPage';
 import {
+  deleteVideo,
   getMe,
   getNeedsSetup,
   getStatus,
@@ -241,6 +242,8 @@ function VideoCard(props: { video: VideoSummary; onChanged: () => void }) {
   const [copied, setCopied] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   async function retry(): Promise<void> {
     setRetryError(null);
@@ -252,6 +255,26 @@ function VideoCard(props: { video: VideoSummary; onChanged: () => void }) {
       setRetryError(err instanceof Error ? err.message : 'Retry failed');
     } finally {
       setRetrying(false);
+    }
+  }
+
+  async function remove(): Promise<void> {
+    // Deletion is irreversible — purges the Source and Rendition and kills the
+    // Share Link (spec: story 20). Confirm before it happens so it can't be an
+    // accident; the window.confirm is the only gate, deliberately.
+    const confirmed = window.confirm(
+      `Delete “${video.title}”? This permanently removes the video and its ` +
+        `Share Link stops working immediately. This can’t be undone.`,
+    );
+    if (!confirmed) return;
+    setDeleteError(null);
+    setDeleting(true);
+    try {
+      await deleteVideo(video.slug);
+      props.onChanged();
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Delete failed');
+      setDeleting(false);
     }
   }
 
@@ -292,11 +315,13 @@ function VideoCard(props: { video: VideoSummary; onChanged: () => void }) {
             <span style={{ width: `${video.progress}%` }} />
           </div>
         )}
-        {video.state === 'failed' ? (
-          <div className="fail">
-            <p className="fail-reason" title={video.failureDetail ?? undefined}>
-              {failureText(video.failureReason)}
-            </p>
+        {video.state === 'failed' && (
+          <p className="fail-reason" title={video.failureDetail ?? undefined}>
+            {failureText(video.failureReason)}
+          </p>
+        )}
+        <div className="video-actions">
+          {video.state === 'failed' ? (
             <button
               className="ghost retry"
               onClick={() => void retry()}
@@ -304,13 +329,21 @@ function VideoCard(props: { video: VideoSummary; onChanged: () => void }) {
             >
               {retrying ? 'Retrying…' : 'Retry'}
             </button>
-            {retryError && <p className="error">{retryError}</p>}
-          </div>
-        ) : (
-          <button className="ghost copy" onClick={() => void copyLink()}>
-            {copied ? 'Copied!' : 'Copy link'}
+          ) : (
+            <button className="ghost copy" onClick={() => void copyLink()}>
+              {copied ? 'Copied!' : 'Copy link'}
+            </button>
+          )}
+          <button
+            className="ghost danger delete"
+            onClick={() => void remove()}
+            disabled={deleting}
+          >
+            {deleting ? 'Deleting…' : 'Delete'}
           </button>
-        )}
+        </div>
+        {retryError && <p className="error">{retryError}</p>}
+        {deleteError && <p className="error">{deleteError}</p>}
       </div>
     </li>
   );
