@@ -14,6 +14,23 @@ async function postJson(url: string, body: unknown): Promise<Response> {
   });
 }
 
+/**
+ * Turns an operator-facing API error response into an Error, surfacing the
+ * server's technical `detail` (or, failing that, its stable `error` code)
+ * rather than a genericised message — the Dashboard is an Operator surface, so
+ * it states the real cause (ADR-0007). `label` is the human lead-in; the raw
+ * diagnostic is appended when the body carries one.
+ */
+async function operatorError(res: Response, label: string): Promise<Error> {
+  try {
+    const body = (await res.json()) as { error?: string; detail?: string };
+    const diagnostic = body.detail ?? body.error;
+    return new Error(diagnostic ? `${label}: ${diagnostic}` : label);
+  } catch {
+    return new Error(label);
+  }
+}
+
 export async function getNeedsSetup(): Promise<boolean> {
   const res = await fetch('/api/setup', { credentials: 'same-origin' });
   const data = (await res.json()) as { needsSetup: boolean };
@@ -131,6 +148,22 @@ export async function getWatch(slug: string): Promise<WatchView | null> {
 }
 
 /**
+ * Retries a Failed Video: re-queues transcoding against the retained Source so
+ * it goes Failed → Processing. Resolves with the re-queued (Processing) Video.
+ * On failure the server's technical reason is surfaced (ADR-0007): a 503 when
+ * transcoding (ffmpeg) is unavailable, a 409 when the Video wasn't Failed.
+ */
+export async function retryVideo(slug: string): Promise<VideoSummary> {
+  const res = await fetch(`/api/videos/${encodeURIComponent(slug)}/retry`, {
+    method: 'POST',
+    credentials: 'same-origin',
+  });
+  if (!res.ok) throw await operatorError(res, 'Retry failed');
+  const data = (await res.json()) as { video: VideoSummary };
+  return data.video;
+}
+
+/**
  * Uploads a Video. The title and description fields are appended before the
  * file so the server knows them by the time the file stream arrives. Resolves
  * with the created (Processing) Video.
@@ -150,10 +183,7 @@ export async function uploadVideo(input: {
     credentials: 'same-origin',
     body: form,
   });
-  if (res.status === 503) {
-    throw new Error('Transcoding is unavailable (ffmpeg not found on the server).');
-  }
-  if (!res.ok) throw new Error('Upload failed');
+  if (!res.ok) throw await operatorError(res, 'Upload failed');
   const data = (await res.json()) as { video: VideoSummary };
   return data.video;
 }

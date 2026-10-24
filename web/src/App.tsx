@@ -5,6 +5,7 @@ import {
   getNeedsSetup,
   getStatus,
   listVideos,
+  retryVideo,
   setup,
   signIn,
   signOut,
@@ -158,7 +159,11 @@ function Dashboard(props: {
       ) : (
         <ul className="video-grid">
           {videos.map((video) => (
-            <VideoCard key={video.slug} video={video} />
+            <VideoCard
+              key={video.slug}
+              video={video}
+              onChanged={() => void refresh()}
+            />
           ))}
         </ul>
       )}
@@ -231,9 +236,24 @@ function UploadForm(props: { onUploaded: () => void; disabled?: boolean }) {
   );
 }
 
-function VideoCard(props: { video: VideoSummary }) {
+function VideoCard(props: { video: VideoSummary; onChanged: () => void }) {
   const { video } = props;
   const [copied, setCopied] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
+
+  async function retry(): Promise<void> {
+    setRetryError(null);
+    setRetrying(true);
+    try {
+      await retryVideo(video.slug);
+      props.onChanged();
+    } catch (err) {
+      setRetryError(err instanceof Error ? err.message : 'Retry failed');
+    } finally {
+      setRetrying(false);
+    }
+  }
 
   async function copyLink(): Promise<void> {
     const url = `${window.location.origin}${video.shareUrl}`;
@@ -273,9 +293,19 @@ function VideoCard(props: { video: VideoSummary }) {
           </div>
         )}
         {video.state === 'failed' ? (
-          <p className="fail-reason" title={video.failureDetail ?? undefined}>
-            {failureText(video.failureReason)}
-          </p>
+          <div className="fail">
+            <p className="fail-reason" title={video.failureDetail ?? undefined}>
+              {failureText(video.failureReason)}
+            </p>
+            <button
+              className="ghost retry"
+              onClick={() => void retry()}
+              disabled={retrying}
+            >
+              {retrying ? 'Retrying…' : 'Retry'}
+            </button>
+            {retryError && <p className="error">{retryError}</p>}
+          </div>
         ) : (
           <button className="ghost copy" onClick={() => void copyLink()}>
             {copied ? 'Copied!' : 'Copy link'}

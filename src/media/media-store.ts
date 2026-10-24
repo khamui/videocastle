@@ -1,4 +1,4 @@
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
 /**
@@ -51,5 +51,15 @@ export class MediaStore {
   /** Creates a Video's media directory if it does not already exist. */
   async ensureVideoDir(id: number): Promise<void> {
     await mkdir(this.videoDir(id), { recursive: true });
+  }
+
+  /**
+   * Removes a Video's Rendition and Poster while keeping its Source, so a retry
+   * transcodes into a clean output directory — a partial Rendition left behind
+   * by a failed run can't linger or bleed into the next attempt.
+   */
+  async clearRendition(id: number): Promise<void> {
+    await rm(this.renditionDir(id), { recursive: true, force: true });
+    await rm(this.posterPath(id), { force: true });
   }
 }

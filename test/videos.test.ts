@@ -1,4 +1,10 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { TranscodeError } from '../src/ports/transcoder';
@@ -16,6 +22,27 @@ afterEach(async () => {
 async function signedIn(): Promise<TestApp & { jar: Record<string, string> }> {
   current = await buildTestApp();
   return { ...current, jar: await setupOperator(current.app) };
+}
+
+/**
+ * Uploads one Video and drives its transcode to Failed via the fake
+ * Transcoder, leaving it in the Failed state ready to be retried.
+ */
+async function uploadFailed(
+  app: TestApp['app'],
+  jar: Record<string, string>,
+  transcoder: TestApp['transcoder'],
+  worker: TestApp['worker'],
+  error = new TranscodeError('encode_failed', 'ffmpeg blew up', 'stderr tail here'),
+): Promise<void> {
+  transcoder.auto = false;
+  await uploadVideo(app, jar, {
+    fields: { title: 'Clip' },
+    file: { fieldname: 'file', filename: 'clip.mp4', content: 'bytes' },
+  });
+  await waitFor(() => transcoder.requests.length === 1);
+  await transcoder.fail(error);
+  await worker.idle();
 }
 
 describe('uploading a Video', () => {
@@ -186,6 +213,139 @@ describe('transcoding to Ready', () => {
       failureReason: 'encode_failed',
       failureDetail: 'stderr tail here',
     });
+  });
+
+  it('retains the Source when a transcode fails, so it can be retried', async () => {
+    const { app, jar, transcoder, worker, config } = await signedIn();
+
+    await uploadFailed(app, jar, transcoder, worker);
+
+    // The Source the Operator uploaded is still on disk under the Video's dir.
+    const [id] = readdirSync(config.mediaDir);
+    const source = readFileSync(join(config.mediaDir, id!, 'source'), 'utf8');
+    expect(source).toBe('bytes');
+  });
+});
+
+describe('retrying a Failed Video', () => {
+  it('re-queues transcoding and moves the Video back to Processing', async () => {
+    const { app, jar, transcoder, worker } = await signedIn();
+    await uploadFailed(app, jar, transcoder, worker);
+
+    const retry = await app.inject({
+      method: 'POST',
+      url: '/api/videos/slug-1/retry',
+      cookies: jar,
+    });
+
+    expect(retry.statusCode).toBe(200);
+    // Back to Processing, with the prior failure diagnostics cleared.
+    expect(retry.json().video).toMatchObject({
+      slug: 'slug-1',
+      state: 'processing',
+      progress: 0,
+      failureReason: null,
+      failureDetail: null,
+    });
+
+    // The worker picked the job up again: a second transcode is in flight,
+    // and completing it drives the Video to Ready.
+    await waitFor(() => transcoder.requests.length === 2);
+    await transcoder.complete();
+    await worker.idle();
+
+    const list = await app.inject({ method: 'GET', url: '/api/videos', cookies: jar });
+    expect(list.json().videos[0]).toMatchObject({ state: 'ready', progress: 100 });
+  });
+
+  it('purges a partial Rendition before re-queuing, keeping the Source', async () => {
+    const { app, jar, transcoder, worker, config } = await signedIn();
+    await uploadFailed(app, jar, transcoder, worker);
+
+    // Simulate the debris a failed real transcode can leave behind: a partial
+    // Rendition and Poster in the Video's dir, alongside the retained Source.
+    const [id] = readdirSync(config.mediaDir);
+    const dir = join(config.mediaDir, id!);
+    mkdirSync(join(dir, 'rendition'), { recursive: true });
+    writeFileSync(join(dir, 'rendition', 'seg_000.ts'), 'partial');
+    writeFileSync(join(dir, 'rendition', 'index.m3u8'), 'partial');
+    writeFileSync(join(dir, 'poster.jpg'), 'partial');
+
+    const retry = await app.inject({
+      method: 'POST',
+      url: '/api/videos/slug-1/retry',
+      cookies: jar,
+    });
+    expect(retry.statusCode).toBe(200);
+
+    // The partial Rendition and Poster are gone; the Source is untouched.
+    expect(existsSync(join(dir, 'rendition'))).toBe(false);
+    expect(existsSync(join(dir, 'poster.jpg'))).toBe(false);
+    expect(readFileSync(join(dir, 'source'), 'utf8')).toBe('bytes');
+  });
+
+  it('refuses to retry a Video that is not Failed (409, technical reason)', async () => {
+    const { app, jar, worker } = await signedIn();
+    // A plain upload with the default auto transcoder reaches Ready.
+    await uploadVideo(app, jar, {
+      fields: { title: 'Clip' },
+      file: { fieldname: 'file', filename: 'clip.mp4', content: 'bytes' },
+    });
+    await worker.idle();
+
+    const retry = await app.inject({
+      method: 'POST',
+      url: '/api/videos/slug-1/retry',
+      cookies: jar,
+    });
+
+    expect(retry.statusCode).toBe(409);
+    // ADR-0007: the Operator gets the real state, not a genericised message.
+    expect(retry.json()).toMatchObject({ error: 'not_retryable' });
+    expect(retry.json().detail).toContain('ready');
+  });
+
+  it('returns 404 for an unknown Video slug', async () => {
+    const { app, jar } = await signedIn();
+
+    const retry = await app.inject({
+      method: 'POST',
+      url: '/api/videos/does-not-exist/retry',
+      cookies: jar,
+    });
+
+    expect(retry.statusCode).toBe(404);
+    expect(retry.json()).toMatchObject({ error: 'video_not_found' });
+  });
+
+  it('requires an authenticated Operator', async () => {
+    const { app, jar, transcoder, worker } = await signedIn();
+    await uploadFailed(app, jar, transcoder, worker);
+
+    const retry = await app.inject({ method: 'POST', url: '/api/videos/slug-1/retry' });
+
+    expect(retry.statusCode).toBe(401);
+  });
+
+  it('refuses to retry with 503 when transcoding is unavailable', async () => {
+    const { app, jar, transcoder, worker } = await signedIn();
+    await uploadFailed(app, jar, transcoder, worker);
+
+    // ffmpeg becomes unrunnable after the failure; a retry would only re-fail.
+    transcoder.available = false;
+
+    const retry = await app.inject({
+      method: 'POST',
+      url: '/api/videos/slug-1/retry',
+      cookies: jar,
+    });
+
+    expect(retry.statusCode).toBe(503);
+    expect(retry.json()).toMatchObject({ error: 'transcoding_unavailable' });
+
+    // Still Failed — nothing was re-queued.
+    const list = await app.inject({ method: 'GET', url: '/api/videos', cookies: jar });
+    expect(list.json().videos[0]).toMatchObject({ state: 'failed' });
   });
 });
 

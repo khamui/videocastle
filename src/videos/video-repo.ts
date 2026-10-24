@@ -89,8 +89,26 @@ export class VideoRepo {
   }
 
   /**
+   * Re-queues a Failed Video for transcoding: back to `processing` with
+   * progress reset and the prior failure diagnostics cleared, so a retry starts
+   * from a clean slate (the Source is retained and reused). The caller is
+   * responsible for having checked the Video was Failed and for enqueuing it.
+   */
+  async markProcessing(id: number): Promise<void> {
+    await this.db
+      .update(videos)
+      .set({
+        state: 'processing',
+        progress: 0,
+        failureReason: null,
+        failureDetail: null,
+      })
+      .where(eq(videos.id, id));
+  }
+
+  /**
    * Marks a Video Failed after a transcode error, recording why so the Operator
-   * sees an actionable reason (retry lands in a later ticket).
+   * sees an actionable reason and can retry (see {@link markProcessing}).
    */
   async markFailed(
     id: number,

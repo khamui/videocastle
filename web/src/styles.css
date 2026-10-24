@@ -313,11 +313,23 @@ button.ghost {
   padding: 7px 11px;
 }
 
+.fail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
 .fail-reason {
   margin: 0;
   font-size: 0.8rem;
   color: var(--error);
   cursor: help;
+}
+
+.retry {
+  font-size: 0.8rem;
+  padding: 7px 11px;
 }
 
 /* --- Watch Page (Viewer surface) --- */
