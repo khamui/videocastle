@@ -24,15 +24,28 @@ TLS-terminating reverse proxy.
 
 Requires Node.js 24+ (for the built-in `node:sqlite` module) and `ffmpeg` on
 your PATH (the transcoder shells out to `ffmpeg`/`ffprobe`; without them uploads
-succeed but every transcode lands in Failed). With Nix, `nix-shell` provides
-both:
+succeed but every transcode lands in Failed). The flake dev shell provides Node
+24, ffmpeg, and `process-compose`:
 
 ```sh
-nix-shell            # Node 24 + ffmpeg on PATH (see shell.nix)
+nix develop          # enter the dev shell (or use direnv — see below)
 npm install
+process-compose up   # runs API (:8080) + SPA (:5173) together; q / Ctrl-C stops both
+```
+
+`process-compose up` supervises both dev servers as one group, so quitting it
+tears everything down — no servers left running on stray ports. To run them
+individually instead:
+
+```sh
 npm run dev:server   # API on http://localhost:8080
 npm run dev:web      # SPA on http://localhost:5173 (proxies /api to :8080)
 ```
+
+If you use [direnv](https://direnv.net) with `nix-direnv`, the committed
+`.envrc` (`use flake`) auto-loads the dev shell whenever you `cd` in — run
+`direnv allow` once. That keeps ffmpeg on PATH in every terminal, so the server
+never starts without it.
 
 Then open http://localhost:5173 and complete first-run setup.
 

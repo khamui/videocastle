@@ -1,0 +1,18 @@
+# Runs the dev stack as one supervised group, so starting and (crucially)
+# stopping are a single action — no orphaned servers left on stray ports.
+#
+#   process-compose up      # start API + SPA; press q / Ctrl-C to stop both
+#
+# Requires the dev shell (ffmpeg + Node 24 on PATH): `nix develop` or direnv.
+version: "0.5"
+
+processes:
+  api:
+    command: npm run dev:server
+    availability:
+      restart: "no"
+
+  web:
+    command: npm run dev:web
+    availability:
+      restart: "no"
