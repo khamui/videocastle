@@ -48,6 +48,9 @@ export function createTranscodeWorker(
   }
 
   async function run(videoId: number): Promise<void> {
+    let outcome:
+      | { kind: 'ready'; result: Awaited<ReturnType<Transcoder['transcode']>> }
+      | { kind: 'failed'; failure: { reason: string; detail?: string } };
     try {
       await deps.store.ensureVideoDir(videoId);
       const result = await deps.transcoder.transcode({
@@ -56,22 +59,46 @@ export function createTranscodeWorker(
         onProgress: (percent) =>
           deps.repo.setProgress(videoId, clampPercent(percent)),
       });
-      await deps.repo.markReady(videoId, result);
+      outcome = { kind: 'ready', result };
     } catch (err) {
       onError(videoId, err);
-      const failure =
-        err instanceof TranscodeError
-          ? { reason: err.reason, detail: err.detail }
-          : { reason: 'encode_failed', detail: messageOf(err) };
-      // Best-effort: if even marking Failed throws (e.g. the DB is closing
-      // during shutdown), contain it so a background job can never surface as
-      // an unhandled rejection.
-      try {
-        await deps.repo.markFailed(videoId, failure);
-      } catch (failErr) {
-        onError(videoId, failErr);
-      }
+      outcome = {
+        kind: 'failed',
+        failure:
+          err instanceof TranscodeError
+            ? { reason: err.reason, detail: err.detail }
+            : { reason: 'encode_failed', detail: messageOf(err) },
+      };
     }
+
+    // Persist the outcome once the transcode has stopped writing. The whole
+    // epilogue is best-effort and contained: a transcode that lands while the
+    // DB is closing (shutdown) must never surface as an unhandled rejection
+    // from this background job.
+    try {
+      // The Video may have been deleted while the transcode was in flight (a
+      // Processing delete). The delete already purged the dir, but the
+      // transcode kept writing into it afterwards; now that it has finished,
+      // sweep the orphaned Rendition/Poster so deleted private footage is
+      // really gone (spec: any ──delete──▶ gone) instead of recording state
+      // against a vanished row.
+      if (await deleted(videoId)) {
+        await deps.store.removeVideo(videoId);
+        return;
+      }
+      if (outcome.kind === 'ready') {
+        await deps.repo.markReady(videoId, outcome.result);
+      } else {
+        await deps.repo.markFailed(videoId, outcome.failure);
+      }
+    } catch (epilogueErr) {
+      onError(videoId, epilogueErr);
+    }
+  }
+
+  /** Whether the Video was deleted while its transcode was running. */
+  async function deleted(videoId: number): Promise<boolean> {
+    return (await deps.repo.findById(videoId)) === undefined;
   }
 
   function pump(): void {

@@ -62,4 +62,14 @@ export class MediaStore {
     await rm(this.renditionDir(id), { recursive: true, force: true });
     await rm(this.posterPath(id), { force: true });
   }
+
+  /**
+   * Purges everything a Video holds on disk — its Source, Rendition, and Poster
+   * — by removing the Video's directory whole. Used when a Video is deleted (so
+   * private footage is really gone) and to roll back a failed upload. `force`
+   * makes it a no-op when the directory is already absent.
+   */
+  async removeVideo(id: number): Promise<void> {
+    await rm(this.videoDir(id), { recursive: true, force: true });
+  }
 }
