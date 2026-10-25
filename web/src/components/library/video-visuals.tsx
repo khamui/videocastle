@@ -82,3 +82,13 @@ export function ExpiredBadge({ label }: { label: string }) {
     </span>
   );
 }
+
+/**
+ * Stable 0–4 tint index from a slug, so a Video's placeholder thumbnail keeps
+ * the same colour everywhere it appears (card, drawer, Folder video list).
+ */
+export function thumbTint(slug: string): number {
+  let hash = 0;
+  for (let i = 0; i < slug.length; i++) hash = (hash * 31 + slug.charCodeAt(i)) | 0;
+  return Math.abs(hash) % THUMB_GRADIENTS.length;
+}
