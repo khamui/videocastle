@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { WatchPage } from './WatchPage';
 import { GalleryPage } from './GalleryPage';
 import { FeedbackProvider } from '@/components/feedback/feedback-provider';
-import { useFeedback } from '@/components/feedback/use-feedback';
 import {
   AppShell,
   SectionPlaceholder,
@@ -16,9 +15,10 @@ import {
   VideoThumb,
 } from '@/components/library/video-visuals';
 import { VideoDrawer } from '@/components/library/video-drawer';
+import { UploadDialog } from '@/components/library/upload-dialog';
+import { NewFolderDialog } from '@/components/library/new-folder-dialog';
 import {
   clearFolderPassword,
-  createFolder,
   deleteFolder,
   getMe,
   getNeedsSetup,
@@ -30,7 +30,6 @@ import {
   setup,
   signIn,
   signOut,
-  uploadVideo,
   type FolderSummary,
   type OperatorSummary,
   type TranscodingStatus,
@@ -179,18 +178,6 @@ function Dashboard(props: {
     return () => clearInterval(id);
   }, [anyProcessing]);
 
-  async function newFolder(): Promise<void> {
-    const name = window.prompt('Name the new Folder:');
-    if (name === null || name.trim().length === 0) return;
-    setError(null);
-    try {
-      await createFolder(name.trim());
-      await refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not create Folder');
-    }
-  }
-
   // The Videos shown depends on where we are: inside a Folder, only its Videos;
   // at the root, only the unfiled ones (Folders are listed separately).
   const shown = (videos ?? []).filter((v) => v.folderSlug === openFolder);
@@ -205,10 +192,21 @@ function Dashboard(props: {
   const libraryBody = (
     <div className="library">
       <header className="library-head">
-        <h1>{openFolder ? current?.name ?? 'Folder' : 'Library'}</h1>
-        <span className="muted">
-          {folders.length} folders · {(videos ?? []).length} videos
-        </span>
+        <div className="flex flex-col gap-1">
+          <h1>{openFolder ? current?.name ?? 'Folder' : 'Library'}</h1>
+          <span className="text-sm text-muted-foreground">
+            {folders.length} folders · {(videos ?? []).length} videos
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          {!openFolder && (
+            <NewFolderDialog onCreated={() => void refresh()} />
+          )}
+          <UploadDialog
+            disabled={status != null && !status.available}
+            onUploaded={() => void refresh()}
+          />
+        </div>
       </header>
 
       {openFolder ? (
@@ -227,21 +225,11 @@ function Dashboard(props: {
         </div>
       )}
 
-      <UploadForm
-        disabled={status != null && !status.available}
-        onUploaded={() => void refresh()}
-      />
-
       {error && <p className="error">{error}</p>}
 
       {/* Folders live in the Library root alongside the unfiled Videos. */}
       {!openFolder && (
-        <section className="mb-3 mt-2 flex items-center justify-between">
-          <h2 className="text-base font-semibold">Folders</h2>
-          <button className="ghost" onClick={() => void newFolder()}>
-            New folder
-          </button>
-        </section>
+        <h2 className="mb-3 mt-2 text-base font-semibold">Folders</h2>
       )}
       {!openFolder &&
         (folders.length === 0 ? (
@@ -271,7 +259,7 @@ function Dashboard(props: {
         <p className="rounded-xl border border-dashed border-border p-12 text-center text-muted-foreground">
           {openFolder
             ? 'This Folder is empty. Move a Video into it from the Library.'
-            : 'No unfiled Videos. Upload one above to get a Share Link.'}
+            : 'No unfiled Videos. Upload one to get a Share Link.'}
         </p>
       ) : (
         <ul className="grid list-none grid-cols-1 gap-4 p-0 sm:grid-cols-2 xl:grid-cols-3">
@@ -301,71 +289,6 @@ function Dashboard(props: {
         <SectionPlaceholder title={placeholderTitles[section]} />
       )}
     </AppShell>
-  );
-}
-
-function UploadForm(props: { onUploaded: () => void; disabled?: boolean }) {
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [file, setFile] = useState<File | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
-
-  return (
-    <form
-      className="upload"
-      onSubmit={async (e) => {
-        e.preventDefault();
-        if (!file) return;
-        setError(null);
-        setBusy(true);
-        try {
-          await uploadVideo({ title, description, file });
-          setTitle('');
-          setDescription('');
-          setFile(null);
-          if (fileInput.current) fileInput.current.value = '';
-          props.onUploaded();
-        } catch (err) {
-          setError(err instanceof Error ? err.message : 'Upload failed');
-        } finally {
-          setBusy(false);
-        }
-      }}
-    >
-      <div className="upload-row">
-        <input
-          className="upload-title"
-          placeholder="Video title"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          required
-        />
-        <input
-          ref={fileInput}
-          type="file"
-          accept="video/*,.mov,.mp4,.m4v"
-          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-          required
-        />
-        <button
-          type="submit"
-          disabled={
-            props.disabled || busy || !file || title.trim().length === 0
-          }
-        >
-          {busy ? 'Uploading…' : 'Upload'}
-        </button>
-      </div>
-      <input
-        className="upload-desc"
-        placeholder="Description (optional)"
-        value={description}
-        onChange={(e) => setDescription(e.target.value)}
-      />
-      {error && <p className="error">{error}</p>}
-    </form>
   );
 }
 
