@@ -24,6 +24,11 @@ export interface TranscodeWorkerDeps {
   onError?: (videoId: number, err: unknown) => void;
 }
 
+/**
+ * @param concurrency How many transcodes run at once. The application passes
+ * `config.transcodeConcurrency` (env `TRANSCODE_CONCURRENCY`); the default here
+ * is the same value, for direct callers that don't care.
+ */
 export function createTranscodeWorker(
   deps: TranscodeWorkerDeps,
   concurrency = 2,

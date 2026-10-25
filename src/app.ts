@@ -91,13 +91,16 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const videoRepo = new VideoRepo(deps.db);
   const folderRepo = new FolderRepo(deps.db);
   const mediaStore = new MediaStore(deps.config.mediaDir);
-  const worker = createTranscodeWorker({
-    repo: videoRepo,
-    store: mediaStore,
-    transcoder: deps.transcoder,
-    onError: (videoId, err) =>
-      app.log.error({ err, videoId }, 'transcode failed'),
-  });
+  const worker = createTranscodeWorker(
+    {
+      repo: videoRepo,
+      store: mediaStore,
+      transcoder: deps.transcoder,
+      onError: (videoId, err) =>
+        app.log.error({ err, videoId }, 'transcode failed'),
+    },
+    deps.config.transcodeConcurrency,
+  );
   app.decorate('videoWorker', worker);
 
   // Probe transcoding availability once at boot so uploads can be gated and the
@@ -106,7 +109,16 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const transcoding = createTranscodingStatus(deps.transcoder);
   const availability = await transcoding.refresh();
   if (availability.available) {
-    app.log.info({ ffmpeg: availability.version }, 'transcoding available');
+    // Log the effective limits too: "why is this instance transcoding slowly?"
+    // should be answerable from the boot log rather than from the environment.
+    app.log.info(
+      {
+        ffmpeg: availability.version,
+        concurrency: deps.config.transcodeConcurrency,
+        threads: deps.config.ffmpegThreads ?? 'ffmpeg default',
+      },
+      'transcoding available',
+    );
   } else {
     app.log.warn(
       { error: availability.error },
