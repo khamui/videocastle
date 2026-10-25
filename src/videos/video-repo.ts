@@ -1,6 +1,7 @@
-import { desc, eq, isNull } from 'drizzle-orm';
+import { desc, eq, isNull, sql } from 'drizzle-orm';
 import type { Database } from '../db/client';
 import { videos, type Video } from '../db/schema';
+import type { MediaBytes } from '../media/media-store';
 
 /**
  * Data access for Videos. Mirrors the style of {@link OperatorRepo}: Drizzle
@@ -74,6 +75,9 @@ export class VideoRepo {
       playlistPath: string;
       posterPath: string;
       durationSeconds: number;
+      /** What the transcode just wrote, measured by the worker. */
+      renditionBytes: number;
+      posterBytes: number;
     },
   ): Promise<void> {
     await this.db
@@ -84,6 +88,8 @@ export class VideoRepo {
         playlistPath: result.playlistPath,
         posterPath: result.posterPath,
         durationSeconds: result.durationSeconds,
+        renditionBytes: result.renditionBytes,
+        posterBytes: result.posterBytes,
       })
       .where(eq(videos.id, id));
   }
@@ -102,6 +108,11 @@ export class VideoRepo {
         progress: 0,
         failureReason: null,
         failureDetail: null,
+        // The caller clears the old Rendition and Poster from disk before
+        // re-queueing, so their recorded bytes go with them — otherwise the
+        // instance would appear to hold media it has just deleted.
+        renditionBytes: 0,
+        posterBytes: 0,
       })
       .where(eq(videos.id, id));
   }
@@ -171,5 +182,47 @@ export class VideoRepo {
   /** Removes a Video row — used to roll back a failed upload before it transcodes. */
   async delete(id: number): Promise<void> {
     await this.db.delete(videos).where(eq(videos.id, id));
+  }
+
+  /** Records what the Source weighed, once the upload stream has closed. */
+  async setSourceBytes(id: number, sourceBytes: number): Promise<void> {
+    await this.db.update(videos).set({ sourceBytes }).where(eq(videos.id, id));
+  }
+
+  /**
+   * Overwrites all three recorded byte figures with measured ones. Only the
+   * one-time backfill and `storage-reconcile --apply` do this; ordinary writes
+   * record what they themselves wrote.
+   */
+  async setMediaBytes(id: number, bytes: MediaBytes): Promise<void> {
+    await this.db
+      .update(videos)
+      .set({
+        sourceBytes: bytes.sourceBytes,
+        renditionBytes: bytes.renditionBytes,
+        posterBytes: bytes.posterBytes,
+      })
+      .where(eq(videos.id, id));
+  }
+
+  /**
+   * What this instance holds, as a `SUM()` over the recorded figures — never a
+   * walk of the media directory, which would be O(Library) on every call.
+   * Includes the Sources of Failed Videos: they are real bytes on a real disk.
+   */
+  async storageTotals(): Promise<MediaBytes> {
+    const rows = await this.db
+      .select({
+        sourceBytes: sql<number>`coalesce(sum(${videos.sourceBytes}), 0)`,
+        renditionBytes: sql<number>`coalesce(sum(${videos.renditionBytes}), 0)`,
+        posterBytes: sql<number>`coalesce(sum(${videos.posterBytes}), 0)`,
+      })
+      .from(videos);
+    const row = rows[0];
+    return {
+      sourceBytes: Number(row?.sourceBytes ?? 0),
+      renditionBytes: Number(row?.renditionBytes ?? 0),
+      posterBytes: Number(row?.posterBytes ?? 0),
+    };
   }
 }

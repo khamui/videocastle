@@ -109,6 +109,34 @@ To keep the new password out of the process list, omit it and pass
 `VIDEOCASTLE_NEW_PASSWORD` in the environment instead. The old password stops
 working immediately; no restart is needed.
 
+### Check that the reported storage figures are still true
+
+videocastle records what each Video occupies as it writes it, so showing usage
+never costs a walk of the media directory. That means the figures can drift — a
+crash between writing media and recording it, a restore from a backup taken at a
+different moment, a file removed by hand. `storage-reconcile` compares what is
+recorded against what is on disk:
+
+```sh
+docker compose exec videocastle npm run start -- storage-reconcile
+```
+
+It reports only and writes nothing. Add `--apply` to write the measured sizes
+back. It exits non-zero whenever it finds anything, so it works as a cron health
+check with no output parsing:
+
+```
+0  everything agrees
+1  drift, orphaned media, or a Video whose media is gone
+2  bad usage
+```
+
+**It never deletes media, with or without `--apply`** (ADR-0011). Media
+directories with no Video behind them are reported with their size and the
+command to remove them, and left alone — a tool that deletes directories on the
+strength of its own reading of the database would turn a database restore into
+permanent data loss. Removing them is your call.
+
 ### A note on download deterrence
 
 videocastle makes casual saving harder — segmented HLS (never a single grabbable
@@ -126,7 +154,7 @@ accordingly (see ADR-0003).
 | `PORT`                    | `8080`            | Listen port.                                                         |
 | `DATA_DIR`                | `./data`          | Root for SQLite and media; mount a volume here in production.        |
 | `MEDIA_DIR`               | `$DATA_DIR/media` | Where Sources, Renditions, and Posters are written.                  |
-| `MAX_UPLOAD_BYTES`        | `2147483648`      | Largest accepted upload (bytes); default ~2 GB.                      |
+| `MAX_UPLOAD_BYTES`        | `2147483648`      | Largest accepted upload; accepts `2GiB` / `500MB` or bare bytes.     |
 | `FFMPEG_PATH`             | `ffmpeg`          | ffmpeg binary used for transcoding.                                  |
 | `FFPROBE_PATH`            | `ffprobe`         | ffprobe binary used for probing Sources.                             |
 | `TRANSCODE_CONCURRENCY`   | `2`               | Videos transcoded in parallel. Lower it to share the host.           |

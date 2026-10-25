@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { parseBytesOr } from './system/bytes';
 
 /**
  * Runtime configuration, resolved from the environment at process start.
@@ -16,6 +17,7 @@ export interface Config {
   mediaDir: string;
   /**
    * Maximum accepted upload size in bytes (env `MAX_UPLOAD_BYTES`, default 2 GiB).
+   * Accepts a size suffix (`2GiB`, `500MB`) as well as a bare byte count.
    * Enforced both up front via Content-Length and as the multipart file-size
    * limit, so an oversized upload is rejected with a clear 413 and leaves no
    * partial Source behind (see src/videos/routes.ts).
@@ -72,7 +74,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     dataDir,
     dbPath: env.DB_PATH ?? join(dataDir, 'videocastle.db'),
     mediaDir: env.MEDIA_DIR ?? join(dataDir, 'media'),
-    maxUploadBytes: parseIntOr(env.MAX_UPLOAD_BYTES, 2 * 1024 ** 3),
+    maxUploadBytes: parseBytesOr(env.MAX_UPLOAD_BYTES, 2 * 1024 ** 3),
     sessionSecret: env.SESSION_SECRET || undefined,
     cookieSecure: env.COOKIE_SECURE === 'true',
     webDistDir: env.WEB_DIST_DIR || undefined,

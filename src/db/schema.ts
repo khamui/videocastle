@@ -105,6 +105,19 @@ export const videos = sqliteTable('videos', {
    * belongs to at most one Folder (a single column — never two at once).
    */
   folderId: integer('folder_id').references(() => folders.id),
+  /**
+   * Bytes the Source occupies on disk, recorded when the upload stream closes.
+   * Zero when there is no Source — it was never written, or it was discarded
+   * (ADR-0010). A Failed Video still has one, and it still counts.
+   */
+  sourceBytes: integer('source_bytes').notNull().default(0),
+  /**
+   * Bytes the HLS Rendition (playlist + segments) occupies; recorded when the
+   * transcode succeeds, and zeroed when a retry clears the old Rendition.
+   */
+  renditionBytes: integer('rendition_bytes').notNull().default(0),
+  /** Bytes the Poster occupies; recorded alongside the Rendition. */
+  posterBytes: integer('poster_bytes').notNull().default(0),
   /** Short stable failure code (see TranscodeFailureReason); set when Failed. */
   failureReason: text('failure_reason'),
   /** Diagnostic detail for a failure (e.g. trimmed ffmpeg stderr); set when Failed. */

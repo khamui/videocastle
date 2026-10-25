@@ -121,6 +121,20 @@ export interface VideoSummary {
   folderSlug: string | null;
   shareUrl: string;
   createdAt: number;
+  /** What this Video occupies on disk, as recorded at write time. */
+  storage: StorageBytes;
+}
+
+/**
+ * A byte breakdown, for one Video or for the whole instance. The Source is the
+ * part an Operator can choose to give up (ADR-0010); the Rendition is the part
+ * that has to stay for the Video to play.
+ */
+export interface StorageBytes {
+  sourceBytes: number;
+  renditionBytes: number;
+  posterBytes: number;
+  totalBytes: number;
 }
 
 /** A Folder as the Library sees it. Mirrors the server's FolderView. */
@@ -145,11 +159,18 @@ export interface TranscodingStatus {
   error: string | null;
 }
 
+/** What `GET /api/status` reports about the server. Operator-only. */
+export interface ServerStatus {
+  transcoding: TranscodingStatus;
+  /** What this instance holds, summed from the per-Video recorded figures. */
+  storage: StorageBytes;
+}
+
 /** Whether transcoding (ffmpeg) is usable, for the Dashboard's availability banner. */
 export async function getStatus(): Promise<TranscodingStatus> {
   const res = await fetch('/api/status', { credentials: 'same-origin' });
   if (!res.ok) throw new Error('Could not load status');
-  const data = (await res.json()) as { transcoding: TranscodingStatus };
+  const data = (await res.json()) as ServerStatus;
   return data.transcoding;
 }
 
