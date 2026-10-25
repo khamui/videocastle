@@ -1,17 +1,53 @@
 import { createWriteStream } from 'node:fs';
+import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
+import type { FastifyInstance, FastifyPluginOptions, FastifyReply } from 'fastify';
 import { hashPassword } from '../auth/password';
 import type { Clock } from '../ports/clock';
 import type { SlugGenerator } from '../ports/slug';
 import type { Video } from '../db/schema';
 import { totalBytes, type MediaStore } from '../media/media-store';
+import {
+  refusalFor,
+  type StorageAllowance,
+  type StorageGuard,
+} from '../media/storage-guard';
 import type { SessionManager } from '../auth/session';
 import type { TranscodingStatus } from '../system/transcoding-status';
 import type { VideoRepo } from './video-repo';
 import type { FolderRepo } from './folder-repo';
 import type { Folder } from '../db/schema';
 import type { VideoWorker } from './transcode-worker';
+
+/** Raised by {@link byteCeiling} when an upload outgrows what may be written. */
+class StorageCeilingExceeded extends Error {
+  constructor(
+    readonly wrote: number,
+    readonly allowed: number,
+  ) {
+    super(`Source reached ${wrote} bytes, over the ${allowed} bytes available.`);
+    this.name = 'StorageCeilingExceeded';
+  }
+}
+
+/**
+ * Fails the stream the moment the bytes written would pass `allowed`, so a body
+ * that no longer fits stops consuming disk as soon as that is known rather than
+ * at the end of a multi-gigabyte upload.
+ */
+function byteCeiling(allowed: number): Transform {
+  let wrote = 0;
+  return new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      wrote += chunk.length;
+      if (wrote > allowed) {
+        callback(new StorageCeilingExceeded(wrote, allowed));
+        return;
+      }
+      callback(null, chunk);
+    },
+  });
+}
 
 export interface VideoRouteOptions extends FastifyPluginOptions {
   session: SessionManager;
@@ -24,15 +60,35 @@ export interface VideoRouteOptions extends FastifyPluginOptions {
   transcoding: TranscodingStatus;
   /** Hard ceiling on a Source upload, in bytes (spec: configurable max upload size). */
   maxUploadBytes: number;
+  /** The Quota and free-disk ceilings that gate writes (ADR-0011). */
+  storage: StorageGuard;
 }
 
 export async function registerVideoRoutes(
   app: FastifyInstance,
   options: VideoRouteOptions,
 ): Promise<void> {
-  const { session, repo, folderRepo, worker, store, slugGenerator, clock, transcoding, maxUploadBytes } =
+  const { session, repo, folderRepo, worker, store, slugGenerator, clock, transcoding, maxUploadBytes, storage } =
     options;
   const requireOperator = { preHandler: session.requireOperator } as const;
+
+  /**
+   * **507 Insufficient Storage**, not 413. A 413 says "your request is too
+   * large" — a property of the request, which the Operator fixes by sending
+   * something smaller. A 507 says "this server has no room" — a property of the
+   * server, which they fix by freeing space or raising a ceiling. Different
+   * problems; the Operator should not have to guess which one they hit.
+   */
+  function sendStorageRefusal(
+    reply: FastifyReply,
+    allowance: StorageAllowance,
+    wanted: number,
+  ): FastifyReply {
+    const refusal = refusalFor(allowance, wanted, storage.limits);
+    // The body's `error` is the stable machine code the client reads as
+    // `reason` (ADR-0007); `detail` carries the real figures.
+    return reply.code(507).send({ error: refusal.reason, detail: refusal.detail });
+  }
 
   /** Resolves a Video's owning Folder slug (null when it sits in the root). */
   async function folderSlugOf(video: Video): Promise<string | null> {
@@ -89,14 +145,23 @@ export async function registerVideoRoutes(
     // so `> cap` here is a safe early-out; a missing/understated length falls
     // through to the mid-stream limit below (spec: early when present, else mid).
     const declaredLength = request.headers['content-length'];
-    if (declaredLength !== undefined) {
-      const declared = Number(declaredLength);
-      if (Number.isFinite(declared) && declared > maxUploadBytes) {
-        return reply.code(413).send({
-          error: 'upload_too_large',
-          detail: `Upload is ${declared} bytes, over the ${maxUploadBytes}-byte maximum.`,
-        });
-      }
+    const declared =
+      declaredLength === undefined ? undefined : Number(declaredLength);
+    const declaredBytes =
+      declared !== undefined && Number.isFinite(declared) ? declared : undefined;
+
+    if (declaredBytes !== undefined && declaredBytes > maxUploadBytes) {
+      return reply.code(413).send({
+        error: 'upload_too_large',
+        detail: `Upload is ${declaredBytes} bytes, over the ${maxUploadBytes}-byte maximum.`,
+      });
+    }
+
+    // How much this instance may still write. Probed once per upload: a `SUM()`
+    // of the recorded figures plus one `statfs`, never a walk of the media dir.
+    const allowance = await storage.allowance();
+    if (declaredBytes !== undefined && declaredBytes > allowance.bytes) {
+      return sendStorageRefusal(reply, allowance, declaredBytes);
     }
 
     let title: string | undefined;
@@ -127,7 +192,16 @@ export async function registerVideoRoutes(
           createdAt: clock.now(),
         });
         await store.ensureVideoDir(created.id);
-        await pipeline(part.file, createWriteStream(store.sourcePath(created.id)));
+        // A client can omit or understate Content-Length, so the ceiling is
+        // enforced again on the bytes actually arriving. When nothing caps this
+        // instance the counter is skipped entirely rather than taxing every
+        // chunk of every upload.
+        const sink = createWriteStream(store.sourcePath(created.id));
+        if (Number.isFinite(allowance.bytes)) {
+          await pipeline(part.file, byteCeiling(allowance.bytes), sink);
+        } else {
+          await pipeline(part.file, sink);
+        }
 
         // The file exceeded the cap without an honest Content-Length: it was
         // truncated at the limit mid-stream. Roll back the partial Source + row
@@ -160,6 +234,18 @@ export async function registerVideoRoutes(
         await repo.delete(created.id);
         await store.removeVideo(created.id);
       }
+
+      // A ceiling crossed mid-stream: the partial Source has just been removed
+      // above, so nothing is left behind and nothing existing was touched
+      // (ADR-0011).
+      if (err instanceof StorageCeilingExceeded) {
+        request.log.warn(
+          { wrote: err.wrote, allowed: err.allowed },
+          'upload refused: storage ceiling reached mid-stream',
+        );
+        return sendStorageRefusal(reply, allowance, err.wrote);
+      }
+
       request.log.error(err, 'upload failed');
       // ADR-0007: the Operator owns the box — hand them the real cause.
       return reply.code(500).send({
@@ -427,6 +513,17 @@ export async function registerVideoRoutes(
           error: 'transcoding_unavailable',
           detail: status.error ?? undefined,
         });
+      }
+
+      // A retry writes a fresh Rendition, which is the same new bytes an upload
+      // would be, so it is gated too. How big that Rendition will be is not
+      // knowable in advance, so the rule is "is there any room at all?" rather
+      // than a size check: a retry started with headroom may still finish
+      // slightly over a ceiling, and nothing is deleted to fix that — the
+      // over-quota state is simply reported honestly (ADR-0011).
+      const allowance = await storage.allowance();
+      if (allowance.bytes <= 0) {
+        return sendStorageRefusal(reply, allowance, 1);
       }
 
       // Purge any partial Rendition/Poster the failed run left so the retry

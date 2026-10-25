@@ -163,6 +163,8 @@ accordingly (see ADR-0003).
 | `MAX_UPLOAD_BYTES`        | `2147483648`      | Largest accepted upload; accepts `2GiB` / `500MB` or bare bytes.     |
 | `FFMPEG_PATH`             | `ffmpeg`          | ffmpeg binary used for transcoding.                                  |
 | `FFPROBE_PATH`            | `ffprobe`         | ffprobe binary used for probing Sources.                             |
+| `STORAGE_QUOTA_BYTES`     | _(unlimited)_     | Ceiling on total media bytes. Refuses writes; never deletes.          |
+| `MIN_FREE_DISK_BYTES`     | `1GiB`            | Free space that must remain on the media filesystem.                 |
 | `TRANSCODE_CONCURRENCY`   | `2`               | Videos transcoded in parallel. Lower it to share the host.           |
 | `FFMPEG_THREADS`          | _(ffmpeg's own)_  | `-threads` per ffmpeg invocation; caps CPU per transcode.            |
 | `SESSION_SECRET`          | _(auto)_          | Session-signing secret; generated and persisted on first run.        |
@@ -173,6 +175,39 @@ accordingly (see ADR-0003).
 
 Transcoding shells out to `ffmpeg` (bundled in the Docker image). For local
 `npm run dev:server`, install `ffmpeg` on your PATH.
+
+### Capping how much disk videocastle uses
+
+If the box also runs other services, cap what this instance may consume:
+
+```
+STORAGE_QUOTA_BYTES=200GiB
+MIN_FREE_DISK_BYTES=5GiB
+```
+
+`STORAGE_QUOTA_BYTES` is a ceiling on the total bytes of media (Sources,
+Renditions, Posters) and is **unlimited by default** — a fresh install should
+work with no env file. `MIN_FREE_DISK_BYTES` is independent of it and is **on by
+default at 1 GiB**, because a filesystem with no room left can wedge or corrupt
+SQLite; that is a correctness risk rather than a capacity preference.
+
+At either ceiling, videocastle **refuses new writes** — uploads and transcode
+retries — with **507 Insufficient Storage** and a stable reason code
+(`quota_exceeded` or `disk_floor_reached`) carrying the real figures. It is
+checked both from `Content-Length` and again on the bytes actually arriving, so
+a client that omits or understates its length is still stopped, and a refused
+upload leaves no partial Source behind.
+
+**Nothing is ever deleted to make room** (ADR-0011). There is no eviction, no
+pruning, no "oldest first". **Playback is never gated either**: a full disk costs
+you the ability to add Videos, never a Viewer the ability to watch one you
+already shared a link to.
+
+Two consequences worth knowing. Lowering the Quota below what is already stored
+is a legal state — nothing is removed, writes refuse, and the reported usage is
+the truth rather than a figure clamped to the ceiling; you free space by deleting
+Videos you choose. And a Retry that starts with room may finish slightly over,
+because the size of a Rendition is not knowable before it is encoded.
 
 ### Sharing the host with other services
 
