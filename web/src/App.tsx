@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { WatchPage } from './WatchPage';
 import { GalleryPage } from './GalleryPage';
+import { Button } from '@/components/ui/button';
 import {
   clearFolderPassword,
   clearVideoPassword,
@@ -189,9 +190,13 @@ function Dashboard(props: {
         <h1>{openFolder ? current?.name ?? 'Folder' : 'Library'}</h1>
         <div className="library-head-right">
           <span className="muted">{props.operator.username}</span>
-          <button className="ghost" onClick={() => void props.onSignOut()}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void props.onSignOut()}
+          >
             Sign out
-          </button>
+          </Button>
         </div>
       </header>
 
