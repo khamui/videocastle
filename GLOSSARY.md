@@ -55,3 +55,11 @@ _Avoid_: player page, view page
 **Poster**:
 The single still frame grabbed from a Source and shown on the Watch Page before playback begins.
 _Avoid_: thumbnail, preview, cover
+
+**Host Configuration**:
+The settings that only the person running the server decides, fixed when the instance starts and never editable from the Dashboard. Distinct from the Operator's own choices about their Videos, which are theirs to change at any time.
+_Avoid_: settings, options, env vars, admin config
+
+**Quota**:
+The ceiling the Host Configuration puts on how much disk this instance's media may occupy. Reaching it stops new Videos arriving; it never removes Videos that are already there.
+_Avoid_: limit, cap, allowance, max size
