@@ -5,7 +5,8 @@ import { openDatabase } from './db/client';
 import { systemClock } from './ports/clock';
 import { createSlugGenerator } from './ports/slug';
 import { createFfmpegTranscoder } from './transcode/ffmpeg-transcoder';
-import { runResetPasswordCommand } from './cli/reset-password';
+import { runResetPasswordCommand, type CliIo } from './cli/reset-password';
+import { runStorageReconcileCommand } from './cli/storage-reconcile';
 
 /** Production entrypoint: wire the real collaborators and start listening. */
 async function main(): Promise<void> {
@@ -62,8 +63,18 @@ async function main(): Promise<void> {
  */
 const [, , subcommand, ...rest] = process.argv;
 
-if (subcommand === 'reset-password') {
-  runResetPasswordCommand(rest, {
+const commands: Record<
+  string,
+  (args: string[], io: CliIo) => Promise<number>
+> = {
+  'reset-password': runResetPasswordCommand,
+  'storage-reconcile': runStorageReconcileCommand,
+};
+
+const command = subcommand === undefined ? undefined : commands[subcommand];
+
+if (command) {
+  command(rest, {
     // eslint-disable-next-line no-console
     out: (line) => console.log(line),
     // eslint-disable-next-line no-console
@@ -73,9 +84,18 @@ if (subcommand === 'reset-password') {
     .then((code) => process.exit(code))
     .catch((err) => {
       // eslint-disable-next-line no-console
-      console.error('reset-password failed:', err);
+      console.error(`${subcommand} failed:`, err);
       process.exit(1);
     });
+} else if (subcommand !== undefined && !subcommand.startsWith('-')) {
+  // A mistyped subcommand must not fall through to starting the server. Now
+  // that commands run from cron (`storage-reconcile`), a typo there would boot
+  // a second instance against the same data rather than reporting the typo.
+  // eslint-disable-next-line no-console
+  console.error(
+    `Unknown command "${subcommand}". Available: ${Object.keys(commands).join(', ')}.`,
+  );
+  process.exit(2);
 } else {
   main().catch((err) => {
     // eslint-disable-next-line no-console

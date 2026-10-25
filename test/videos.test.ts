@@ -477,7 +477,9 @@ describe('transcoding availability', () => {
     const res = await app.inject({ method: 'GET', url: '/api/status', cookies: jar });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({
+    // The transcoding block is what this asserts; `/api/status` also carries
+    // storage accounting (see storage-accounting.test.ts).
+    expect(res.json()).toMatchObject({
       transcoding: { available: true, version: 'fake-1.0', error: null },
     });
   });
@@ -505,7 +507,7 @@ describe('transcoding availability', () => {
     expect(readdirSync(config.mediaDir)).toHaveLength(0);
 
     const status = await app.inject({ method: 'GET', url: '/api/status', cookies: jar });
-    expect(status.json()).toEqual({
+    expect(status.json()).toMatchObject({
       transcoding: { available: false, version: null, error: 'fake unavailable' },
     });
   });

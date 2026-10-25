@@ -92,7 +92,15 @@ export function createTranscodeWorker(
         return;
       }
       if (outcome.kind === 'ready') {
-        await deps.repo.markReady(videoId, outcome.result);
+        // Measure what the transcode actually wrote, now that it has stopped
+        // writing. Recorded here rather than computed on read, so usage never
+        // costs a directory walk per request.
+        const bytes = await deps.store.measureVideo(videoId);
+        await deps.repo.markReady(videoId, {
+          ...outcome.result,
+          renditionBytes: bytes.renditionBytes,
+          posterBytes: bytes.posterBytes,
+        });
       } else {
         await deps.repo.markFailed(videoId, outcome.failure);
       }

@@ -5,7 +5,7 @@ import { hashPassword } from '../auth/password';
 import type { Clock } from '../ports/clock';
 import type { SlugGenerator } from '../ports/slug';
 import type { Video } from '../db/schema';
-import type { MediaStore } from '../media/media-store';
+import { totalBytes, type MediaStore } from '../media/media-store';
 import type { SessionManager } from '../auth/session';
 import type { TranscodingStatus } from '../system/transcoding-status';
 import type { VideoRepo } from './video-repo';
@@ -45,12 +45,21 @@ export async function registerVideoRoutes(
   // when ffmpeg isn't runnable. Re-probes so recovery needs no restart.
   app.get('/api/status', requireOperator, async () => {
     const status = await transcoding.refresh();
+    // A `SUM()` of figures recorded at write time — not a walk of the media
+    // directory, which would make this endpoint cost O(Library) per poll.
+    const storage = await repo.storageTotals();
     return {
       transcoding: {
         available: status.available,
         version: status.version ?? null,
         // ADR-0007: tell the Operator the real reason it's unavailable.
         error: status.error ?? null,
+      },
+      storage: {
+        sourceBytes: storage.sourceBytes,
+        renditionBytes: storage.renditionBytes,
+        posterBytes: storage.posterBytes,
+        totalBytes: totalBytes(storage),
       },
     };
   });
@@ -131,6 +140,15 @@ export async function registerVideoRoutes(
             detail: `Upload exceeds the ${maxUploadBytes}-byte maximum.`,
           });
         }
+
+        // Record what the Source weighs, now that the stream has closed and
+        // before anything can report on it. Reading it here is the only `stat`
+        // this figure ever costs.
+        created = {
+          ...created,
+          sourceBytes: await store.sourceBytes(created.id),
+        };
+        await repo.setSourceBytes(created.id, created.sourceBytes);
         break; // one file per upload; ignore any trailing parts
       }
     } catch (err) {
@@ -581,6 +599,17 @@ export interface VideoView {
   folderSlug: string | null;
   shareUrl: string;
   createdAt: number;
+  /**
+   * What this Video occupies on disk, as recorded at write time. The Operator
+   * owns the server, so what their media costs is theirs to see — it is what
+   * the Storage view sorts on when they need to free space.
+   */
+  storage: {
+    sourceBytes: number;
+    renditionBytes: number;
+    posterBytes: number;
+    totalBytes: number;
+  };
 }
 
 function serializeVideo(
@@ -603,6 +632,12 @@ function serializeVideo(
     folderSlug,
     shareUrl: `/v/${video.slug}`,
     createdAt: video.createdAt,
+    storage: {
+      sourceBytes: video.sourceBytes,
+      renditionBytes: video.renditionBytes,
+      posterBytes: video.posterBytes,
+      totalBytes: totalBytes(video),
+    },
   };
 }
 

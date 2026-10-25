@@ -1,5 +1,34 @@
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir, readdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
+
+/**
+ * What a Video occupies on disk, split the way an Operator needs to see it: the
+ * Source is the part they can choose to give up (ADR-0010), the Rendition is
+ * the part that must stay for the Video to play.
+ */
+export interface MediaBytes {
+  sourceBytes: number;
+  renditionBytes: number;
+  posterBytes: number;
+}
+
+export const NO_MEDIA_BYTES: MediaBytes = {
+  sourceBytes: 0,
+  renditionBytes: 0,
+  posterBytes: 0,
+};
+
+export function totalBytes(bytes: MediaBytes): number {
+  return bytes.sourceBytes + bytes.renditionBytes + bytes.posterBytes;
+}
+
+/** An entry in the media directory, and the Video it belongs to (if any). */
+export interface MediaEntry {
+  /** The directory name as it is on disk. */
+  name: string;
+  /** The Video id the name encodes, or null when the name isn't one. */
+  videoId: number | null;
+}
 
 /**
  * Resolves the on-disk locations for a Video's media and owns the directory
@@ -72,4 +101,89 @@ export class MediaStore {
   async removeVideo(id: number): Promise<void> {
     await rm(this.videoDir(id), { recursive: true, force: true });
   }
+
+  /**
+   * Bytes the Source occupies right now, or 0 when there isn't one. Read once,
+   * at the moment the upload stream closes, so the recorded figure never costs
+   * a `stat` on a later request.
+   */
+  async sourceBytes(id: number): Promise<number> {
+    return fileBytes(this.sourcePath(id));
+  }
+
+  /**
+   * Measures everything a Video holds on disk. Used when the transcode lands,
+   * by the one-time backfill, and by `storage-reconcile` — never on a request
+   * path, where it would be a directory walk per call.
+   */
+  async measureVideo(id: number): Promise<MediaBytes> {
+    const [sourceBytes, renditionBytes, posterBytes] = await Promise.all([
+      fileBytes(this.sourcePath(id)),
+      dirBytes(this.renditionDir(id)),
+      fileBytes(this.posterPath(id)),
+    ]);
+    return { sourceBytes, renditionBytes, posterBytes };
+  }
+
+  /**
+   * Everything in the media directory. An entry whose name isn't a Video id
+   * still comes back (with `videoId: null`), because it is just as orphaned as
+   * a numbered directory with no row behind it and the Operator should see it.
+   */
+  async listEntries(): Promise<MediaEntry[]> {
+    let names: string[];
+    try {
+      names = await readdir(this.mediaDir);
+    } catch {
+      // No media directory yet (a fresh instance) is an empty store, not an error.
+      return [];
+    }
+    return names.map((name) => ({ name, videoId: videoIdOf(name) }));
+  }
+
+  /** Total bytes under a media-directory entry, by its on-disk name. */
+  async entryBytes(name: string): Promise<number> {
+    return pathBytes(join(this.mediaDir, name));
+  }
+}
+
+/** The Video id a media-directory name encodes, or null when it isn't one. */
+function videoIdOf(name: string): number | null {
+  if (!/^\d+$/.test(name)) return null;
+  const id = Number.parseInt(name, 10);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+/** A file's size, or 0 when it isn't there. Absent media is 0 bytes, not an error. */
+async function fileBytes(path: string): Promise<number> {
+  try {
+    const info = await stat(path);
+    return info.isFile() ? info.size : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** Total size of a directory tree, or 0 when it isn't there. */
+async function dirBytes(path: string): Promise<number> {
+  let names: string[];
+  try {
+    names = await readdir(path);
+  } catch {
+    return 0;
+  }
+  const sizes = await Promise.all(names.map((name) => pathBytes(join(path, name))));
+  return sizes.reduce((sum, size) => sum + size, 0);
+}
+
+/** Total size of a path, following into directories. */
+async function pathBytes(path: string): Promise<number> {
+  let info;
+  try {
+    info = await stat(path);
+  } catch {
+    return 0;
+  }
+  if (info.isDirectory()) return dirBytes(path);
+  return info.isFile() ? info.size : 0;
 }
