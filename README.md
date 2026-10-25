@@ -137,6 +137,12 @@ command to remove them, and left alone — a tool that deletes directories on th
 strength of its own reading of the database would turn a database restore into
 permanent data loss. Removing them is your call.
 
+This is also the one-off step for an instance that has Videos predating storage
+accounting: their recorded sizes are zero, so run `storage-reconcile --apply`
+once after upgrading and the figures are correct from then on. There is
+deliberately no automatic version of this — re-measuring the whole media
+directory is something you ask for, not something a boot does to you.
+
 ### A note on download deterrence
 
 videocastle makes casual saving harder — segmented HLS (never a single grabbable

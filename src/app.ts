@@ -10,7 +10,6 @@ import { OperatorRepo } from './auth/operator-repo';
 import { createSessionManager } from './auth/session';
 import { registerAuthRoutes } from './auth/routes';
 import { MediaStore } from './media/media-store';
-import { runStorageBackfill } from './media/storage-backfill';
 import { VideoRepo } from './videos/video-repo';
 import { FolderRepo } from './videos/folder-repo';
 import { createTranscodeWorker, type VideoWorker } from './videos/transcode-worker';
@@ -103,18 +102,6 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     deps.config.transcodeConcurrency,
   );
   app.decorate('videoWorker', worker);
-
-  // Videos uploaded before storage accounting existed have no recorded sizes,
-  // so measure them once. Runs behind a marker in `app_config`; afterwards,
-  // reconciliation is only ever the explicit `storage-reconcile` command.
-  const backfill = await runStorageBackfill({
-    db: deps.db,
-    repo: videoRepo,
-    store: mediaStore,
-  });
-  if (backfill) {
-    app.log.info(backfill, 'storage accounting backfilled for existing Videos');
-  }
 
   // Probe transcoding availability once at boot so uploads can be gated and the
   // Dashboard warned; log the result loudly since a missing ffmpeg is the most

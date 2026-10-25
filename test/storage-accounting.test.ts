@@ -9,7 +9,7 @@ import { MediaStore } from '../src/media/media-store';
 import { formatBytes, parseBytes } from '../src/system/bytes';
 import { VideoRepo } from '../src/videos/video-repo';
 import { buildTestApp, type TestApp } from './helpers';
-import { setupOperator, uploadVideo, waitFor } from './support';
+import { OPERATOR, cookieJar, setupOperator, uploadVideo, waitFor } from './support';
 
 /**
  * Storage accounting: what this instance holds, recorded as it is written and
@@ -450,18 +450,39 @@ describe('storage-reconcile', () => {
   });
 });
 
-describe('backfilling Videos that predate storage accounting', () => {
-  it('measures their media on the next boot', async () => {
+describe('upgrading an instance that predates storage accounting', () => {
+  it('fills in the figures from one storage-reconcile --apply, and the server then reports them', async () => {
     const inst = instance();
-    // Rows with media on disk but no recorded sizes — exactly what an upgrade
-    // from a version before these columns existed looks like.
+    // Rows with media on disk but no recorded sizes — what an instance that
+    // ran a version before these columns existed looks like after upgrading.
+    // There is no boot-time backfill: this is the documented upgrade step, so
+    // re-measuring is only ever something the Operator asked for.
     await seedVideo(inst, { title: 'Old one', sourceBytes: 1200, record: false });
     await seedVideo(inst, { title: 'Old two', sourceBytes: 3400, record: false });
 
-    const db = inst.open();
-    current = await buildTestApp({ db, env: inst.env });
-    const jar = await setupOperator(current.app);
+    const before = inst.open();
+    const stale = await buildTestApp({ db: before, env: inst.env });
+    const staleJar = await setupOperator(stale.app);
+    // Until it is run, the instance honestly reports nothing recorded.
+    expect(await instanceStorage(stale.app, staleJar)).toMatchObject({ totalBytes: 0 });
+    expect(await library(stale.app, staleJar)).toHaveLength(2);
+    await stale.close();
+    before.close();
 
+    const { code } = await runReconcile(inst, ['--apply']);
+    expect(code).toBe(0);
+
+    const after = inst.open();
+    current = await buildTestApp({ db: after, env: inst.env });
+    // Same persisted data, so the Operator already exists: sign in rather than
+    // set up.
+    const signIn = await current.app.inject({
+      method: 'POST',
+      url: '/api/session',
+      payload: OPERATOR,
+    });
+    expect(signIn.statusCode).toBe(200);
+    const jar = cookieJar(signIn);
     expect(await instanceStorage(current.app, jar)).toMatchObject({
       sourceBytes: 4600,
       totalBytes: 4600,
@@ -469,49 +490,6 @@ describe('backfilling Videos that predate storage accounting', () => {
 
     await current.close();
     current = undefined;
-    db.close();
-  });
-
-  it('records zero for media it cannot read, rather than refusing to boot', async () => {
-    const inst = instance();
-    const id = await seedVideo(inst, { title: 'Half restored', sourceBytes: 500, record: false });
-    rmSync(inst.store.videoDir(id), { recursive: true, force: true });
-
-    const db = inst.open();
-    current = await buildTestApp({ db, env: inst.env });
-    const jar = await setupOperator(current.app);
-
-    expect(await instanceStorage(current.app, jar)).toMatchObject({ totalBytes: 0 });
-    // And the Video is still there to be investigated, not dropped.
-    expect(await library(current.app, jar)).toHaveLength(1);
-
-    await current.close();
-    current = undefined;
-    db.close();
-  });
-
-  it('does not run a second time, so later writes are not overwritten', async () => {
-    const inst = instance();
-    const id = await seedVideo(inst, { title: 'Old', sourceBytes: 700, record: false });
-
-    const first = inst.open();
-    const app1 = await buildTestApp({ db: first, env: inst.env });
-    await app1.close();
-
-    // Media grows after the backfill ran (as a transcode would grow it). The
-    // backfill must not fire again: accounting from here on is the write path's
-    // job, and `storage-reconcile` is the only thing that re-measures.
-    writeFileSync(inst.store.sourcePath(id), 'x'.repeat(5000));
-
-    const app2 = await buildTestApp({ db: first, env: inst.env });
-    const jar = await setupOperator(app2.app);
-    expect(await instanceStorage(app2.app, jar)).toMatchObject({ totalBytes: 700 });
-
-    // The drift is real, and reconcile is what surfaces it.
-    await app2.close();
-    first.close();
-    const { code, out } = await runReconcile(inst);
-    expect(code).toBe(1);
-    expect(out).toContain('on disk:  source=5000');
+    after.close();
   });
 });
