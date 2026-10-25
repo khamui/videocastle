@@ -29,6 +29,7 @@
     "fastify": "^5.2.1",
     "hls.js": "^1.6.15",
     "lucide-react": "^1.61.0",
+    "sonner": "^2.0.8",
     "tailwind-merge": "^3.7.0",
     "tsx": "^4.19.2"
   },
