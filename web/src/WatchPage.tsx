@@ -7,6 +7,7 @@ import {
   unlockWatch,
   type WatchView,
 } from './api';
+import { Button } from '@/components/ui/button';
 
 type State =
   | { kind: 'loading' }
@@ -75,7 +76,11 @@ export function WatchPage(props: { slug: string; folderSlug?: string }) {
 
   switch (state.kind) {
     case 'loading':
-      return <WatchShell backHref={backHref}>Loading…</WatchShell>;
+      return (
+        <WatchShell backHref={backHref}>
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        </WatchShell>
+      );
     case 'unavailable':
       return <Unavailable backHref={backHref} />;
     case 'watch':
@@ -128,8 +133,13 @@ function FolderGate(props: {
 
   return (
     <WatchShell backHref={props.backHref}>
-      <form
-        className="watch-note watch-unlock"
+      <Gate
+        heading="This folder is protected"
+        lede="Enter the password to watch it."
+        password={password}
+        setPassword={setPassword}
+        busy={busy}
+        error={error}
         onSubmit={async (e) => {
           e.preventDefault();
           setError(null);
@@ -144,22 +154,7 @@ function FolderGate(props: {
             setBusy(false);
           }
         }}
-      >
-        <h1>This folder is protected</h1>
-        <p className="muted">Enter the password to watch it.</p>
-        <input
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          autoComplete="off"
-          autoFocus
-          required
-        />
-        {error && <p className="error">{error}</p>}
-        <button type="submit" disabled={busy || password.length === 0}>
-          {busy ? 'Unlocking…' : 'Unlock'}
-        </button>
-      </form>
+      />
     </WatchShell>
   );
 }
@@ -181,8 +176,13 @@ function PasswordPrompt(props: {
 
   return (
     <WatchShell backHref={props.backHref}>
-      <form
-        className="watch-note watch-unlock"
+      <Gate
+        heading="This video is protected"
+        lede="Enter the password to watch it."
+        password={password}
+        setPassword={setPassword}
+        busy={busy}
+        error={error}
         onSubmit={async (e) => {
           e.preventDefault();
           setError(null);
@@ -197,22 +197,7 @@ function PasswordPrompt(props: {
             setBusy(false);
           }
         }}
-      >
-        <h1>This video is protected</h1>
-        <p className="muted">Enter the password to watch it.</p>
-        <input
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          autoComplete="off"
-          autoFocus
-          required
-        />
-        {error && <p className="error">{error}</p>}
-        <button type="submit" disabled={busy || password.length === 0}>
-          {busy ? 'Unlocking…' : 'Unlock'}
-        </button>
-      </form>
+      />
     </WatchShell>
   );
 }
@@ -245,24 +230,37 @@ function Player(props: {
 
   return (
     <WatchShell wide backHref={props.backHref}>
-      <div className="watch-stage">
-        <video
-          ref={videoRef}
-          className="watch-player"
-          controls
-          playsInline
-          poster={view.posterUrl}
-          preload="none"
-          // Deterrence (ADR-0003): hide the browser's download affordance and
-          // the right-click "save video" menu. Not a guarantee — just friction.
-          controlsList="nodownload noplaybackrate noremoteplayback"
-          disablePictureInPicture
-          disableRemotePlayback
-          onContextMenu={(e) => e.preventDefault()}
-        />
+      <div className="relative w-full max-w-[960px]">
+        <div className="aspect-video w-full overflow-hidden rounded-xl border border-border bg-black">
+          <video
+            ref={videoRef}
+            className="block h-full w-full bg-black"
+            controls
+            playsInline
+            poster={view.posterUrl}
+            preload="none"
+            // Deterrence (ADR-0003): hide the browser's download affordance and
+            // the right-click "save video" menu. Not a guarantee — just friction.
+            controlsList="nodownload noplaybackrate noremoteplayback"
+            disablePictureInPicture
+            disableRemotePlayback
+            onContextMenu={(e) => e.preventDefault()}
+          />
+        </div>
+        {/* Download-deterrence badge (ADR-0003): states plainly that saving is
+            discouraged, with no pretense that capture is prevented. */}
+        <span className="pointer-events-none absolute right-3 top-3 flex items-center gap-1 rounded-md bg-black/70 px-2 py-1 text-xs text-white/90 backdrop-blur-sm">
+          ⤓ Download disabled
+        </span>
       </div>
-      <h1 className="watch-title">{view.title}</h1>
-      {view.description && <p className="muted watch-desc">{view.description}</p>}
+      <h1 className="mt-1 w-full max-w-[960px] text-xl font-semibold">
+        {view.title}
+      </h1>
+      {view.description && (
+        <p className="w-full max-w-[960px] text-sm text-muted-foreground">
+          {view.description}
+        </p>
+      )}
     </WatchShell>
   );
 }
@@ -270,14 +268,17 @@ function Player(props: {
 function Preparing(props: { title: string; backHref?: string }) {
   return (
     <WatchShell backHref={props.backHref}>
-      <div className="watch-note">
-        <div className="spinner" aria-hidden />
-        <h1>{props.title}</h1>
-        <p className="muted">
+      <Note>
+        <div
+          className="h-9 w-9 animate-spin rounded-full border-[3px] border-border border-t-primary"
+          aria-hidden
+        />
+        <h1 className="text-xl font-semibold">{props.title}</h1>
+        <p className="leading-relaxed text-muted-foreground">
           This video is still being prepared. It’ll start playing here as soon as
           it’s ready — you can leave this page open or check back shortly.
         </p>
-      </div>
+      </Note>
     </WatchShell>
   );
 }
@@ -285,13 +286,13 @@ function Preparing(props: { title: string; backHref?: string }) {
 function Unavailable(props: { backHref?: string }) {
   return (
     <WatchShell backHref={props.backHref}>
-      <div className="watch-note">
-        <h1>Video not available</h1>
-        <p className="muted">
+      <Note>
+        <h1 className="text-xl font-semibold">Video not available</h1>
+        <p className="leading-relaxed text-muted-foreground">
           This link doesn’t point to a video that can be watched. It may have been
           removed, or the link may be incorrect.
         </p>
-      </div>
+      </Note>
     </WatchShell>
   );
 }
@@ -300,13 +301,56 @@ function Unavailable(props: { backHref?: string }) {
 function TemporarilyUnavailable(props: { backHref?: string }) {
   return (
     <WatchShell backHref={props.backHref}>
-      <div className="watch-note">
-        <h1>Temporarily unavailable</h1>
-        <p className="muted">
+      <Note>
+        <h1 className="text-xl font-semibold">Temporarily unavailable</h1>
+        <p className="leading-relaxed text-muted-foreground">
           This video can’t be played right now. Please check back later.
         </p>
-      </div>
+      </Note>
     </WatchShell>
+  );
+}
+
+/** A reusable password gate body (video or folder), shared by both prompts. */
+function Gate(props: {
+  heading: string;
+  lede: string;
+  password: string;
+  setPassword: (value: string) => void;
+  busy: boolean;
+  error: string | null;
+  onSubmit: (e: React.FormEvent) => void | Promise<void>;
+}) {
+  return (
+    <form
+      className="flex w-full max-w-[320px] flex-col items-stretch gap-3 text-center"
+      onSubmit={props.onSubmit}
+    >
+      <h1 className="text-xl font-semibold">{props.heading}</h1>
+      <p className="text-sm text-muted-foreground">{props.lede}</p>
+      <input
+        type="password"
+        className="rounded-lg border border-input bg-background px-3 py-2.5 text-center text-base text-foreground outline-none focus:border-ring"
+        value={props.password}
+        onChange={(e) => props.setPassword(e.target.value)}
+        autoComplete="off"
+        autoFocus
+        required
+      />
+      {props.error && <p className="text-sm text-destructive">{props.error}</p>}
+      <Button type="submit" disabled={props.busy || props.password.length === 0}>
+        {props.busy ? 'Unlocking…' : 'Unlock'}
+      </Button>
+    </form>
+  );
+}
+
+/** A centered message block (loading / processing / failed / 404). */
+function Note(props: { children: React.ReactNode }) {
+  return (
+    <div className="flex w-full max-w-[420px] flex-col items-center gap-3 text-center">
+      {props.children}
+    </div>
   );
 }
 
@@ -317,9 +361,16 @@ function WatchShell(props: {
   backHref?: string;
 }) {
   return (
-    <main className={`watch${props.wide ? ' watch-wide' : ''}`}>
+    <main
+      className={`flex min-h-screen w-full flex-col items-center gap-4 p-6 ${
+        props.wide ? 'justify-start pt-10' : 'justify-center'
+      }`}
+    >
       {props.backHref && (
-        <a className="watch-back" href={props.backHref}>
+        <a
+          className="w-full max-w-[960px] text-sm text-muted-foreground no-underline hover:text-foreground"
+          href={props.backHref}
+        >
           ← Back to gallery
         </a>
       )}
