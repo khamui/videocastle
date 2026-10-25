@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { WatchPage } from './WatchPage';
 import { GalleryPage } from './GalleryPage';
-import { Button } from '@/components/ui/button';
 import { FeedbackProvider } from '@/components/feedback/feedback-provider';
 import { useFeedback } from '@/components/feedback/use-feedback';
+import {
+  AppShell,
+  SectionPlaceholder,
+  type Section,
+} from '@/components/shell/app-shell';
 import {
   clearFolderPassword,
   clearVideoPassword,
@@ -143,6 +147,8 @@ function Dashboard(props: {
   const [error, setError] = useState<string | null>(null);
   // Which Folder is open, or null for the Library root (Folders + unfiled Videos).
   const [openFolder, setOpenFolder] = useState<string | null>(null);
+  // Which shell nav section is active. Only `library` is built in v1.
+  const [section, setSection] = useState<Section>('library');
 
   async function refresh(): Promise<void> {
     try {
@@ -188,20 +194,19 @@ function Dashboard(props: {
   const shown = (videos ?? []).filter((v) => v.folderSlug === openFolder);
   const current = folders.find((f) => f.slug === openFolder) ?? null;
 
-  return (
-    <main className="library">
+  const placeholderTitles: Record<Exclude<Section, 'library'>, string> = {
+    'share-links': 'Share links',
+    storage: 'Storage',
+    settings: 'Settings',
+  };
+
+  const libraryBody = (
+    <div className="library">
       <header className="library-head">
         <h1>{openFolder ? current?.name ?? 'Folder' : 'Library'}</h1>
-        <div className="library-head-right">
-          <span className="muted">{props.operator.username}</span>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void props.onSignOut()}
-          >
-            Sign out
-          </Button>
-        </div>
+        <span className="muted">
+          {folders.length} folders · {(videos ?? []).length} videos
+        </span>
       </header>
 
       {openFolder ? (
@@ -274,7 +279,22 @@ function Dashboard(props: {
           ))}
         </ul>
       )}
-    </main>
+    </div>
+  );
+
+  return (
+    <AppShell
+      operator={props.operator.username}
+      section={section}
+      onNavigate={setSection}
+      onSignOut={() => void props.onSignOut()}
+    >
+      {section === 'library' ? (
+        libraryBody
+      ) : (
+        <SectionPlaceholder title={placeholderTitles[section]} />
+      )}
+    </AppShell>
   );
 }
 
