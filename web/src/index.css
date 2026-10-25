@@ -1,0 +1,97 @@
+@import 'tailwindcss';
+
+/*
+ * Studio Dark design tokens (ADR-0008). The palette comes from the
+ * `prototype/look-and-feel` branch; the hex values mirror the legacy
+ * `styles.css` :root so the migration is visually continuous. shadcn/ui reads
+ * the `--background`/`--primary`/… variables; `@theme inline` exposes each as a
+ * Tailwind color utility (bg-background, text-muted-foreground, bg-ok, …).
+ *
+ * videocastle is dark-only (color-scheme: dark), so the tokens live on :root
+ * and `.dark` is mirrored for any component that scopes itself to it.
+ */
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* Status colors used by pills/meters in later tickets. */
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --radius: 0.5rem;
+
+  --background: #0e0f13;
+  --foreground: #e7e9ee;
+  --card: #1a1c23;
+  --card-foreground: #e7e9ee;
+  --popover: #1a1c23;
+  --popover-foreground: #e7e9ee;
+  --primary: #6d6aff;
+  --primary-foreground: #ffffff;
+  --secondary: #1a1c23;
+  --secondary-foreground: #e7e9ee;
+  --muted: #1a1c23;
+  --muted-foreground: #9aa0ad;
+  --accent: #262a35;
+  --accent-foreground: #e7e9ee;
+  --destructive: #ff6b6b;
+  --destructive-foreground: #ffffff;
+  --border: #2b2e38;
+  --input: #2b2e38;
+  --ring: #6d6aff;
+
+  --ok: #36d3a6;
+  --warn: #f0b454;
+
+  color-scheme: dark;
+}
+
+.dark {
+  --background: #0e0f13;
+  --foreground: #e7e9ee;
+  --card: #1a1c23;
+  --card-foreground: #e7e9ee;
+  --popover: #1a1c23;
+  --popover-foreground: #e7e9ee;
+  --primary: #6d6aff;
+  --primary-foreground: #ffffff;
+  --secondary: #1a1c23;
+  --secondary-foreground: #e7e9ee;
+  --muted: #1a1c23;
+  --muted-foreground: #9aa0ad;
+  --accent: #262a35;
+  --accent-foreground: #e7e9ee;
+  --destructive: #ff6b6b;
+  --destructive-foreground: #ffffff;
+  --border: #2b2e38;
+  --input: #2b2e38;
+  --ring: #6d6aff;
+
+  --ok: #36d3a6;
+  --warn: #f0b454;
+}
