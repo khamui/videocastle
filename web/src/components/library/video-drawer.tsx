@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ExternalLink, Play } from 'lucide-react';
+import { ChevronLeft, Play } from 'lucide-react';
 
 import {
   clearVideoPassword,
@@ -11,7 +11,6 @@ import {
   type FolderSummary,
   type VideoSummary,
 } from '../../api';
-import { useFeedback } from '@/components/feedback/use-feedback';
 import { Button } from '@/components/ui/button';
 import {
   Select,
@@ -26,31 +25,18 @@ import {
   SheetContent,
   SheetTitle,
 } from '@/components/ui/sheet';
-import { Switch } from '@/components/ui/switch';
+import {
+  Field,
+  ShareLinkFields,
+  openShareLink,
+  useDrawerActions,
+} from '@/components/library/drawer-parts';
 import {
   ExpiredBadge,
   ProtectedBadge,
   StatusPill,
   VideoThumb,
 } from '@/components/library/video-visuals';
-
-const DAY = 24 * 60 * 60 * 1000;
-const EXPIRY_PRESETS = [
-  { value: '1', label: '24 hours' },
-  { value: '3', label: '3 days' },
-  { value: '7', label: '7 days' },
-];
-
-function Field(props: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-2">
-      <span className="text-xs font-medium text-muted-foreground">
-        {props.label}
-      </span>
-      {props.children}
-    </div>
-  );
-}
 
 /**
  * Video detail drawer (ADR-0008 Model 2): copy link, password, expiry, move,
@@ -65,87 +51,16 @@ export function VideoDrawer(props: {
   onChanged: () => void;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Shown when the drawer was drilled into from a Folder's drawer. */
+  backTo?: { label: string; onBack: () => void };
 }) {
-  const { video, folders, onChanged } = props;
-  const { notify, reportError } = useFeedback();
-  const [busy, setBusy] = useState(false);
-  const [showPwdInput, setShowPwdInput] = useState(false);
-  const [pwd, setPwd] = useState('');
+  const { video, folders } = props;
+  const actions = useDrawerActions(props.onChanged);
+  const { busy, run } = actions;
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
-  const shareUrl = `${window.location.origin}${video.shareUrl}`;
-
-  async function run(
-    fn: () => Promise<unknown>,
-    successMsg: string,
-    errorTitle: string,
-  ): Promise<boolean> {
-    setBusy(true);
-    try {
-      await fn();
-      notify(successMsg);
-      onChanged();
-      return true;
-    } catch (err) {
-      // Operator error → persistent, copy-pasteable surface with the reason
-      // code and raw diagnostic (ADR-0007/0009), never a transient toast.
-      reportError(err, { title: errorTitle });
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function copyLink(): Promise<void> {
-    try {
-      await navigator.clipboard.writeText(shareUrl);
-      notify('Link copied to clipboard');
-    } catch {
-      reportError(new Error('The browser blocked clipboard access.'), {
-        title: 'Copy failed',
-      });
-    }
-  }
-
   function preview(): void {
-    window.open(video.shareUrl, '_blank', 'noopener,noreferrer');
-  }
-
-  async function onPwdToggle(checked: boolean): Promise<void> {
-    if (checked) {
-      if (!video.protected) setShowPwdInput(true);
-    } else if (video.protected) {
-      await run(
-        () => clearVideoPassword(video.slug),
-        'Password removed',
-        'Could not remove password',
-      );
-    } else {
-      setShowPwdInput(false);
-      setPwd('');
-    }
-  }
-
-  async function savePwd(): Promise<void> {
-    if (pwd.trim().length === 0) return;
-    const ok = await run(
-      () => setVideoPassword(video.slug, pwd.trim()),
-      'Password set',
-      'Could not set password',
-    );
-    if (ok) {
-      setPwd('');
-      setShowPwdInput(false);
-    }
-  }
-
-  async function onExpiryChange(value: string): Promise<void> {
-    const expiresAt = value === 'never' ? null : Date.now() + Number(value) * DAY;
-    await run(
-      () => setVideoExpiry(video.slug, expiresAt),
-      expiresAt == null ? 'Expiry cleared' : 'Link expiry updated',
-      'Could not update expiry',
-    );
+    openShareLink(video.shareUrl);
   }
 
   async function onMove(value: string): Promise<void> {
@@ -165,15 +80,20 @@ export function VideoDrawer(props: {
     if (ok) props.onOpenChange(false);
   }
 
-  const expiryStatus = video.expired
-    ? 'This link has expired.'
-    : video.expiresAt != null
-      ? `Expires ${new Date(video.expiresAt).toLocaleString()}`
-      : 'Never expires';
-
   return (
     <Sheet open={props.open} onOpenChange={props.onOpenChange}>
       <SheetContent>
+        {props.backTo && (
+          <button
+            type="button"
+            onClick={props.backTo.onBack}
+            className="-mb-1 flex items-center gap-1 self-start bg-transparent p-0 text-xs text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <ChevronLeft className="size-3.5" />
+            {props.backTo.label}
+          </button>
+        )}
+
         <SheetTitle>{video.title}</SheetTitle>
 
         <div className="relative overflow-hidden rounded-lg border border-border">
@@ -211,76 +131,17 @@ export function VideoDrawer(props: {
           </div>
         )}
 
-        <Field label="Share link">
-          <div className="flex gap-2">
-            <input
-              readOnly
-              value={shareUrl}
-              onFocus={(e) => e.currentTarget.select()}
-              className="h-9 min-w-0 flex-1 rounded-md border border-border bg-background px-3 font-mono text-xs"
-            />
-            <Button variant="outline" size="sm" onClick={() => void copyLink()}>
-              Copy
-            </Button>
-            <Button variant="outline" size="sm" onClick={preview}>
-              <ExternalLink className="size-4" />
-            </Button>
-          </div>
-        </Field>
-
-        <Field label="Password protect">
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-xs text-muted-foreground">
-              {video.protected
-                ? 'A password is required to watch.'
-                : 'Anyone with the link can watch.'}
-            </span>
-            <Switch
-              checked={video.protected || showPwdInput}
-              onCheckedChange={(c) => void onPwdToggle(c)}
-              disabled={busy}
-            />
-          </div>
-          {showPwdInput && !video.protected && (
-            <div className="flex gap-2">
-              <input
-                type="password"
-                autoFocus
-                value={pwd}
-                onChange={(e) => setPwd(e.target.value)}
-                placeholder="New password"
-                className="h-9 min-w-0 flex-1 rounded-md border border-border bg-background px-3 text-sm"
-              />
-              <Button
-                size="sm"
-                onClick={() => void savePwd()}
-                disabled={busy || pwd.trim().length === 0}
-              >
-                Save
-              </Button>
-            </div>
-          )}
-        </Field>
-
-        <Field label="Link expiry">
-          <p className="text-xs text-muted-foreground">{expiryStatus}</p>
-          <Select
-            onValueChange={(v) => void onExpiryChange(v)}
-            disabled={busy}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Change link expiry…" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="never">Never</SelectItem>
-              {EXPIRY_PRESETS.map((o) => (
-                <SelectItem key={o.value} value={o.value}>
-                  {video.expired ? `Re-enable · ${o.label}` : o.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
+        <ShareLinkFields
+          link={video}
+          actions={actions}
+          passwordHint={{
+            on: 'A password is required to watch.',
+            off: 'Anyone with the link can watch.',
+          }}
+          setPassword={(password) => setVideoPassword(video.slug, password)}
+          clearPassword={() => clearVideoPassword(video.slug)}
+          setExpiry={(expiresAt) => setVideoExpiry(video.slug, expiresAt)}
+        />
 
         <Field label="Folder">
           <Select

@@ -13,20 +13,18 @@ import {
   ProtectedBadge,
   StatusPill,
   VideoThumb,
+  thumbTint,
 } from '@/components/library/video-visuals';
 import { VideoDrawer } from '@/components/library/video-drawer';
+import { FolderDrawer } from '@/components/library/folder-drawer';
 import { UploadDialog } from '@/components/library/upload-dialog';
 import { NewFolderDialog } from '@/components/library/new-folder-dialog';
 import {
-  clearFolderPassword,
-  deleteFolder,
   getMe,
   getNeedsSetup,
   getStatus,
   listFolders,
   listVideos,
-  setFolderExpiry,
-  setFolderPassword,
   setup,
   signIn,
   signOut,
@@ -146,8 +144,6 @@ function Dashboard(props: {
   const [folders, setFolders] = useState<FolderSummary[]>([]);
   const [status, setStatus] = useState<TranscodingStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Which Folder is open, or null for the Library root (Folders + unfiled Videos).
-  const [openFolder, setOpenFolder] = useState<string | null>(null);
   // Which shell nav section is active. Only `library` is built in v1.
   const [section, setSection] = useState<Section>('library');
 
@@ -178,10 +174,9 @@ function Dashboard(props: {
     return () => clearInterval(id);
   }, [anyProcessing]);
 
-  // The Videos shown depends on where we are: inside a Folder, only its Videos;
-  // at the root, only the unfiled ones (Folders are listed separately).
-  const shown = (videos ?? []).filter((v) => v.folderSlug === openFolder);
-  const current = folders.find((f) => f.slug === openFolder) ?? null;
+  // The Library root lists Folders and the unfiled Videos side by side; a
+  // Folder's own Videos live in its drawer, not in this grid.
+  const unfiled = (videos ?? []).filter((v) => v.folderSlug === null);
 
   const placeholderTitles: Record<Exclude<Section, 'library'>, string> = {
     'share-links': 'Share links',
@@ -193,27 +188,19 @@ function Dashboard(props: {
     <div className="library">
       <header className="library-head">
         <div className="flex flex-col gap-1">
-          <h1>{openFolder ? current?.name ?? 'Folder' : 'Library'}</h1>
+          <h1>Library</h1>
           <span className="text-sm text-muted-foreground">
             {folders.length} folders · {(videos ?? []).length} videos
           </span>
         </div>
         <div className="flex items-center gap-2">
-          {!openFolder && (
-            <NewFolderDialog onCreated={() => void refresh()} />
-          )}
+          <NewFolderDialog onCreated={() => void refresh()} />
           <UploadDialog
             disabled={status != null && !status.available}
             onUploaded={() => void refresh()}
           />
         </div>
       </header>
-
-      {openFolder ? (
-        <button className="ghost back" onClick={() => setOpenFolder(null)}>
-          ← Back to Library
-        </button>
-      ) : null}
 
       {status && !status.available && (
         <div className="banner">
@@ -228,42 +215,38 @@ function Dashboard(props: {
       {error && <p className="error">{error}</p>}
 
       {/* Folders live in the Library root alongside the unfiled Videos. */}
-      {!openFolder && (
-        <h2 className="mb-3 mt-2 text-base font-semibold">Folders</h2>
+      <h2 className="mb-3 mt-2 text-base font-semibold">Folders</h2>
+      {folders.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-border p-12 text-center text-muted-foreground">
+          No Folders yet.
+        </p>
+      ) : (
+        <ul className="mb-6 grid list-none grid-cols-1 gap-4 p-0 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {folders.map((folder) => (
+            <FolderCard
+              key={folder.slug}
+              folder={folder}
+              videos={(videos ?? []).filter(
+                (v) => v.folderSlug === folder.slug,
+              )}
+              folders={folders}
+              onChanged={() => void refresh()}
+            />
+          ))}
+        </ul>
       )}
-      {!openFolder &&
-        (folders.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-border p-12 text-center text-muted-foreground">
-            No Folders yet.
-          </p>
-        ) : (
-          <ul className="mb-6 grid list-none grid-cols-1 gap-4 p-0 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {folders.map((folder) => (
-              <FolderCard
-                key={folder.slug}
-                folder={folder}
-                onOpen={() => setOpenFolder(folder.slug)}
-                onChanged={() => void refresh()}
-              />
-            ))}
-          </ul>
-        ))}
 
-      {!openFolder && (
-        <h2 className="mb-3 mt-2 text-base font-semibold">Videos</h2>
-      )}
+      <h2 className="mb-3 mt-2 text-base font-semibold">Videos</h2>
 
       {videos === null ? (
         <p className="text-muted-foreground">Loading…</p>
-      ) : shown.length === 0 ? (
+      ) : unfiled.length === 0 ? (
         <p className="rounded-xl border border-dashed border-border p-12 text-center text-muted-foreground">
-          {openFolder
-            ? 'This Folder is empty. Move a Video into it from the Library.'
-            : 'No unfiled Videos. Upload one to get a Share Link.'}
+          No unfiled Videos. Upload one to get a Share Link.
         </p>
       ) : (
         <ul className="grid list-none grid-cols-1 gap-4 p-0 sm:grid-cols-2 xl:grid-cols-3">
-          {shown.map((video) => (
+          {unfiled.map((video) => (
             <VideoCard
               key={video.slug}
               video={video}
@@ -294,101 +277,21 @@ function Dashboard(props: {
 
 function FolderCard(props: {
   folder: FolderSummary;
-  onOpen: () => void;
+  /** The Videos in this Folder, listed inside its drawer. */
+  videos: VideoSummary[];
+  folders: FolderSummary[];
   onChanged: () => void;
 }) {
   const { folder } = props;
-  const [copied, setCopied] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
-  // Deleting a Folder is a choice, not a yes/no: reveal both options inline
-  // before anything happens (spec: story 31 — present both options before acting).
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-
-  async function remove(mode: 'delete' | 'keep'): Promise<void> {
-    setActionError(null);
-    setDeleting(true);
-    try {
-      await deleteFolder(folder.slug, mode);
-      props.onChanged();
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Could not delete Folder');
-      setDeleting(false);
-      setConfirmingDelete(false);
-    }
-  }
-
-  async function togglePassword(): Promise<void> {
-    setActionError(null);
-    try {
-      if (folder.protected) {
-        if (
-          !window.confirm(
-            `Remove the password on “${folder.name}”? Anyone with the gallery link will be able to browse it.`,
-          )
-        ) {
-          return;
-        }
-        await clearFolderPassword(folder.slug);
-      } else {
-        const password = window.prompt(
-          `Set a password for the folder “${folder.name}”. Viewers unlock the gallery once, then play any video in it.`,
-        );
-        if (password === null || password.trim().length === 0) return;
-        await setFolderPassword(folder.slug, password.trim());
-      }
-      props.onChanged();
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Could not update password');
-    }
-  }
-
-  async function editExpiry(): Promise<void> {
-    setActionError(null);
-    const current = folder.expiresAt
-      ? `Currently expires ${new Date(folder.expiresAt).toLocaleString()}.\n\n`
-      : '';
-    const answer = window.prompt(
-      `${current}Expire the folder “${folder.name}” in how many days from now? ` +
-        `Leave blank to clear the expiry; enter 0 to expire now.`,
-    );
-    if (answer === null) return;
-    const trimmed = answer.trim();
-    let expiresAt: number | null;
-    if (trimmed.length === 0) {
-      expiresAt = null;
-    } else {
-      const days = Number(trimmed);
-      if (!Number.isFinite(days) || days < 0) {
-        setActionError('Enter a number of days (0 or more), or leave blank to clear.');
-        return;
-      }
-      expiresAt = Date.now() + days * 24 * 60 * 60 * 1000;
-    }
-    try {
-      await setFolderExpiry(folder.slug, expiresAt);
-      props.onChanged();
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Could not update expiry');
-    }
-  }
-
-  async function copyLink(): Promise<void> {
-    try {
-      await navigator.clipboard.writeText(`${window.location.origin}${folder.shareUrl}`);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      setCopied(false);
-    }
-  }
+  const [open, setOpen] = useState(false);
 
   return (
     <li>
       <Card className="flex flex-col gap-3 p-4">
         <button
+          type="button"
           className="flex w-full flex-col items-start gap-1 bg-transparent p-0 text-left text-foreground"
-          onClick={props.onOpen}
+          onClick={() => setOpen(true)}
         >
           <span className="flex items-center gap-2">
             <strong className="text-sm">📁 {folder.name}</strong>
@@ -406,56 +309,15 @@ function FolderCard(props: {
             Link expires {new Date(folder.expiresAt).toLocaleString()}
           </p>
         )}
-      {confirmingDelete ? (
-        <div className="folder-delete-confirm">
-          <p className="muted">
-            Delete “{folder.name}”? Choose what happens to its {folder.videoCount}{' '}
-            video{folder.videoCount === 1 ? '' : 's'}:
-          </p>
-          <div className="video-actions folder-actions">
-            <button
-              className="ghost danger"
-              onClick={() => void remove('delete')}
-              disabled={deleting}
-            >
-              Delete folder &amp; its videos
-            </button>
-            <button
-              className="ghost"
-              onClick={() => void remove('keep')}
-              disabled={deleting}
-            >
-              Delete folder only (keep videos)
-            </button>
-            <button
-              className="ghost"
-              onClick={() => setConfirmingDelete(false)}
-              disabled={deleting}
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="video-actions folder-actions">
-          <button className="ghost copy" onClick={() => void copyLink()}>
-            {copied ? 'Copied!' : 'Copy link'}
-          </button>
-          <button className="ghost password" onClick={() => void togglePassword()}>
-            {folder.protected ? 'Remove password' : 'Set password'}
-          </button>
-          <button className="ghost expiry" onClick={() => void editExpiry()}>
-            {folder.expiresAt != null ? 'Edit expiry' : 'Set expiry'}
-          </button>
-          <button className="ghost danger delete" onClick={() => setConfirmingDelete(true)}>
-            Delete
-          </button>
-        </div>
-      )}
-        {actionError && (
-          <p className="text-sm text-destructive">{actionError}</p>
-        )}
       </Card>
+      <FolderDrawer
+        folder={folder}
+        videos={props.videos}
+        folders={props.folders}
+        onChanged={props.onChanged}
+        open={open}
+        onOpenChange={setOpen}
+      />
     </li>
   );
 }
@@ -478,7 +340,7 @@ function VideoCard(props: {
         >
           <VideoThumb
             state={video.state}
-            tintIndex={hashIndex(video.slug)}
+            tintIndex={thumbTint(video.slug)}
             duration={
               video.durationSeconds != null
                 ? formatDuration(video.durationSeconds)
@@ -528,7 +390,7 @@ function VideoCard(props: {
       <VideoDrawer
         video={video}
         folders={props.folders}
-        tintIndex={hashIndex(video.slug)}
+        tintIndex={thumbTint(video.slug)}
         onChanged={props.onChanged}
         open={open}
         onOpenChange={setOpen}
@@ -559,13 +421,6 @@ function formatDuration(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = Math.floor(totalSeconds % 60);
   return `${minutes}:${String(seconds).padStart(2, '0')}`;
-}
-
-/** Stable 0–4 index from a slug, so each placeholder thumbnail gets a steady tint. */
-function hashIndex(slug: string): number {
-  let hash = 0;
-  for (let i = 0; i < slug.length; i++) hash = (hash * 31 + slug.charCodeAt(i)) | 0;
-  return Math.abs(hash) % 5;
 }
 
 function CredentialForm(props: {
