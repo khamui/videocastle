@@ -159,19 +159,73 @@ export interface TranscodingStatus {
   error: string | null;
 }
 
+/** How close this instance is to a storage ceiling. */
+export type StoragePressure = 'ok' | 'warning' | 'full';
+
+/**
+ * What this instance holds and what caps it. Mirrors the server's
+ * StorageReport. `usedPercent` can exceed 100 — an Operator may lower the Quota
+ * below what is already stored, and nothing is deleted to resolve that
+ * (ADR-0011), so the figure is reported rather than clamped.
+ */
+export interface StorageReport extends StorageBytes {
+  /** The Quota, or null when unlimited. */
+  quotaBytes: number | null;
+  minFreeDiskBytes: number;
+  /** Free bytes on the media filesystem, or null when the probe failed. */
+  freeDiskBytes: number | null;
+  /** Bytes a new Source may still occupy, or null when nothing caps it. */
+  writableBytes: number | null;
+  warnPercent: number;
+  /** Media held as a percentage of the Quota, or null when unlimited. */
+  usedPercent: number | null;
+  pressure: StoragePressure;
+  /** The SQLite file's size. Shown for completeness, excluded from the Quota. */
+  databaseBytes: number | null;
+}
+
 /** What `GET /api/status` reports about the server. Operator-only. */
 export interface ServerStatus {
   transcoding: TranscodingStatus;
-  /** What this instance holds, summed from the per-Video recorded figures. */
-  storage: StorageBytes;
+  storage: StorageReport;
 }
 
-/** Whether transcoding (ffmpeg) is usable, for the Dashboard's availability banner. */
-export async function getStatus(): Promise<TranscodingStatus> {
+/** Transcoding health and storage usage, for the Dashboard's banners and meter. */
+export async function getStatus(): Promise<ServerStatus> {
   const res = await fetch('/api/status', { credentials: 'same-origin' });
   if (!res.ok) throw new Error('Could not load status');
-  const data = (await res.json()) as ServerStatus;
-  return data.transcoding;
+  return (await res.json()) as ServerStatus;
+}
+
+/** Where a Host Configuration value came from (GLOSSARY: Host Configuration). */
+export type ValueSource = 'default' | 'environment' | 'invalid';
+
+export interface HostSetting {
+  key: string;
+  value: string;
+  source: ValueSource;
+  description: string;
+  /** The raw environment value, when it was rejected as unreadable. */
+  rejected?: string;
+  /** A readable rendering of a byte count, shown beside the exact figure. */
+  humanValue?: string;
+}
+
+export interface HostConfigSection {
+  title: string;
+  settings: HostSetting[];
+}
+
+/**
+ * The Host Configuration, read-only: these are fixed at process start and are
+ * never editable from the Dashboard. Its own endpoint rather than part of
+ * `/api/status`, which is polled while a Video transcodes.
+ */
+export async function getServerConfig(): Promise<HostConfigSection[]> {
+  const res = await fetch('/api/server-config', { credentials: 'same-origin' });
+  if (!res.ok) throw new Error('Could not load the server configuration');
+  const data = (await res.json()) as { sections: HostConfigSection[] };
+  return data.sections;
 }
 
 /** The Operator's Library, newest first. */

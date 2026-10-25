@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { WatchPage } from './WatchPage';
 import { GalleryPage } from './GalleryPage';
 import { FeedbackProvider } from '@/components/feedback/feedback-provider';
+import { formatBytes } from '@/lib/format';
 import {
   AppShell,
   SectionPlaceholder,
@@ -18,6 +19,8 @@ import {
 import { VideoDrawer } from '@/components/library/video-drawer';
 import { FolderDrawer } from '@/components/library/folder-drawer';
 import { UploadDialog } from '@/components/library/upload-dialog';
+import { StorageSection } from '@/components/storage/storage-section';
+import { ServerSection } from '@/components/settings/server-section';
 import { NewFolderDialog } from '@/components/library/new-folder-dialog';
 import {
   getMe,
@@ -30,7 +33,8 @@ import {
   signOut,
   type FolderSummary,
   type OperatorSummary,
-  type TranscodingStatus,
+  type ServerStatus,
+  type StorageReport,
   type VideoSummary,
 } from './api';
 
@@ -142,7 +146,7 @@ function Dashboard(props: {
 }) {
   const [videos, setVideos] = useState<VideoSummary[] | null>(null);
   const [folders, setFolders] = useState<FolderSummary[]>([]);
-  const [status, setStatus] = useState<TranscodingStatus | null>(null);
+  const [status, setStatus] = useState<ServerStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Which shell nav section is active. Only `library` is built in v1.
   const [section, setSection] = useState<Section>('library');
@@ -178,11 +182,7 @@ function Dashboard(props: {
   // Folder's own Videos live in its drawer, not in this grid.
   const unfiled = (videos ?? []).filter((v) => v.folderSlug === null);
 
-  const placeholderTitles: Record<Exclude<Section, 'library'>, string> = {
-    'share-links': 'Share links',
-    storage: 'Storage',
-    settings: 'Settings',
-  };
+  const storage = status?.storage ?? null;
 
   const libraryBody = (
     <div className="library">
@@ -196,20 +196,31 @@ function Dashboard(props: {
         <div className="flex items-center gap-2">
           <NewFolderDialog onCreated={() => void refresh()} />
           <UploadDialog
-            disabled={status != null && !status.available}
+            disabled={
+              (status != null && !status.transcoding.available) ||
+              storage?.pressure === 'full'
+            }
             onUploaded={() => void refresh()}
           />
         </div>
       </header>
 
-      {status && !status.available && (
+      {status && !status.transcoding.available && (
         <div className="banner">
           <strong>Transcoding is unavailable.</strong> ffmpeg isn’t runnable on
           the server, so uploads are paused. Install ffmpeg (or set
           <code>FFMPEG_PATH</code>) and it resumes automatically — no restart
           needed.
-          {status.error && <pre className="banner-detail">{status.error}</pre>}
+          {status.transcoding.error && (
+            <pre className="banner-detail">{status.transcoding.error}</pre>
+          )}
         </div>
+      )}
+
+      {/* Approaching or at a storage ceiling is a standing condition, not an
+          event, so it gets the banner rather than a toast (ADR-0009). */}
+      {storage && storage.pressure !== 'ok' && (
+        <StoragePressureBanner storage={storage} />
       )}
 
       {error && <p className="error">{error}</p>}
@@ -263,15 +274,60 @@ function Dashboard(props: {
     <AppShell
       operator={props.operator.username}
       section={section}
+      storage={storage}
       onNavigate={setSection}
       onSignOut={() => void props.onSignOut()}
     >
-      {section === 'library' ? (
-        libraryBody
-      ) : (
-        <SectionPlaceholder title={placeholderTitles[section]} />
+      {section === 'library' && libraryBody}
+      {section === 'storage' && (
+        <StorageSection storage={storage} videos={videos} />
       )}
+      {section === 'settings' && <ServerSection />}
+      {section === 'share-links' && <SectionPlaceholder title="Share links" />}
     </AppShell>
+  );
+}
+
+/**
+ * Standing notice that storage is running out, reusing the ffmpeg-unavailable
+ * banner. Deliberately not a toast: a toast is for a transient success
+ * (ADR-0009), while approaching a ceiling is a condition the Operator should
+ * keep seeing until they act on it. Technical and specific about what to do
+ * (ADR-0007) — and explicit that nothing will be deleted for them (ADR-0011).
+ */
+function StoragePressureBanner(props: { storage: StorageReport }) {
+  const { storage } = props;
+  const full = storage.pressure === 'full';
+
+  return (
+    <div className="banner">
+      {full ? (
+        <>
+          <strong>Storage is full, so uploads are being refused.</strong>{' '}
+          {storage.quotaBytes === null
+            ? `Free disk on the host has dropped to the ${formatBytes(storage.minFreeDiskBytes)} floor.`
+            : `This instance holds ${formatBytes(storage.totalBytes)} against a ${formatBytes(storage.quotaBytes)} quota — ${storage.usedPercent}% of it.`}{' '}
+          Delete Videos you no longer need, or raise the ceiling. Nothing will be
+          deleted automatically, and Videos you have already shared keep playing.
+        </>
+      ) : (
+        <>
+          <strong>Storage is {storage.usedPercent}% full.</strong>{' '}
+          {formatBytes(storage.totalBytes)} of{' '}
+          {formatBytes(storage.quotaBytes ?? 0)} used
+          {storage.writableBytes !== null &&
+            `, ${formatBytes(storage.writableBytes)} still writable`}
+          . Uploads will be refused once it runs out.
+        </>
+      )}
+      <pre className="banner-detail">
+        quota: {storage.quotaBytes === null ? 'unlimited' : `${storage.quotaBytes} bytes (STORAGE_QUOTA_BYTES)`}
+        {'\n'}held: {storage.totalBytes} bytes
+        {'\n'}free on disk:{' '}
+        {storage.freeDiskBytes === null ? 'unknown' : `${storage.freeDiskBytes} bytes`}
+        {'\n'}reserved floor: {storage.minFreeDiskBytes} bytes (MIN_FREE_DISK_BYTES)
+      </pre>
+    </div>
   );
 }
 

@@ -274,7 +274,9 @@ describe('what the instance holds', () => {
 
   it('reports nothing held on a fresh instance', async () => {
     const { app, jar } = await signedIn();
-    expect(await instanceStorage(app, jar)).toEqual({
+    // The accounting figures; the ceilings and pressure alongside them are
+    // storage-limits.test.ts / storage-transparency.test.ts.
+    expect(await instanceStorage(app, jar)).toMatchObject({
       sourceBytes: 0,
       renditionBytes: 0,
       posterBytes: 0,
