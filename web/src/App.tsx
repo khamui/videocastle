@@ -8,6 +8,13 @@ import {
   SectionPlaceholder,
   type Section,
 } from '@/components/shell/app-shell';
+import { Card } from '@/components/ui/card';
+import {
+  ExpiredBadge,
+  ProtectedBadge,
+  StatusPill,
+  VideoThumb,
+} from '@/components/library/video-visuals';
 import {
   clearFolderPassword,
   clearVideoPassword,
@@ -234,8 +241,8 @@ function Dashboard(props: {
 
       {/* Folders live in the Library root alongside the unfiled Videos. */}
       {!openFolder && (
-        <section className="folders-head">
-          <h2>Folders</h2>
+        <section className="mb-3 mt-2 flex items-center justify-between">
+          <h2 className="text-base font-semibold">Folders</h2>
           <button className="ghost" onClick={() => void newFolder()}>
             New folder
           </button>
@@ -243,9 +250,11 @@ function Dashboard(props: {
       )}
       {!openFolder &&
         (folders.length === 0 ? (
-          <p className="placeholder">No Folders yet.</p>
+          <p className="rounded-xl border border-dashed border-border p-12 text-center text-muted-foreground">
+            No Folders yet.
+          </p>
         ) : (
-          <ul className="folder-grid">
+          <ul className="mb-6 grid list-none grid-cols-1 gap-4 p-0 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {folders.map((folder) => (
               <FolderCard
                 key={folder.slug}
@@ -257,18 +266,20 @@ function Dashboard(props: {
           </ul>
         ))}
 
-      {!openFolder && <h2>Videos</h2>}
+      {!openFolder && (
+        <h2 className="mb-3 mt-2 text-base font-semibold">Videos</h2>
+      )}
 
       {videos === null ? (
-        <p className="muted">Loading…</p>
+        <p className="text-muted-foreground">Loading…</p>
       ) : shown.length === 0 ? (
-        <p className="placeholder">
+        <p className="rounded-xl border border-dashed border-border p-12 text-center text-muted-foreground">
           {openFolder
             ? 'This Folder is empty. Move a Video into it from the Library.'
             : 'No unfiled Videos. Upload one above to get a Share Link.'}
         </p>
       ) : (
-        <ul className="video-grid">
+        <ul className="grid list-none grid-cols-1 gap-4 p-0 sm:grid-cols-2 xl:grid-cols-3">
           {shown.map((video) => (
             <VideoCard
               key={video.slug}
@@ -455,30 +466,28 @@ function FolderCard(props: {
   }
 
   return (
-    <li className="card folder-card">
-      <button className="folder-open" onClick={props.onOpen}>
-        <span className="folder-name">
-          <strong>📁 {folder.name}</strong>
-          {folder.protected && (
-            <span className="pill protected" title="Password-protected">
-              🔒
-            </span>
-          )}
-          {folder.expired && (
-            <span className="pill expired" title="The gallery link has expired">
-              expired
-            </span>
-          )}
-        </span>
-        <span className="muted">
-          {folder.videoCount} video{folder.videoCount === 1 ? '' : 's'}
-        </span>
-      </button>
-      {folder.expiresAt != null && !folder.expired && (
-        <p className="muted expiry-note">
-          Link expires {new Date(folder.expiresAt).toLocaleString()}
-        </p>
-      )}
+    <li>
+      <Card className="flex flex-col gap-3 p-4">
+        <button
+          className="flex w-full flex-col items-start gap-1 bg-transparent p-0 text-left text-foreground"
+          onClick={props.onOpen}
+        >
+          <span className="flex items-center gap-2">
+            <strong className="text-sm">📁 {folder.name}</strong>
+            {folder.protected && <ProtectedBadge label="Password-protected" />}
+            {folder.expired && (
+              <ExpiredBadge label="The gallery link has expired" />
+            )}
+          </span>
+          <span className="text-xs text-muted-foreground">
+            {folder.videoCount} video{folder.videoCount === 1 ? '' : 's'}
+          </span>
+        </button>
+        {folder.expiresAt != null && !folder.expired && (
+          <p className="text-xs text-muted-foreground">
+            Link expires {new Date(folder.expiresAt).toLocaleString()}
+          </p>
+        )}
       {confirmingDelete ? (
         <div className="folder-delete-confirm">
           <p className="muted">
@@ -525,7 +534,10 @@ function FolderCard(props: {
           </button>
         </div>
       )}
-      {actionError && <p className="error">{actionError}</p>}
+        {actionError && (
+          <p className="text-sm text-destructive">{actionError}</p>
+        )}
+      </Card>
     </li>
   );
 }
@@ -676,52 +688,53 @@ function VideoCard(props: {
   }
 
   return (
-    <li className="card video-card">
-      <div
-        className={`thumb ${
-          video.state === 'processing'
-            ? 'thumb-processing'
-            : video.state === 'failed'
-              ? 'thumb-failed'
-              : `thumb-${hashIndex(video.slug)}`
-        }`}
-      >
-        {video.durationSeconds != null && (
-          <span className="duration">{formatDuration(video.durationSeconds)}</span>
-        )}
-      </div>
-      <div className="video-body">
-        <div className="video-title-row">
-          <strong className="video-title">{video.title}</strong>
-          {video.protected && (
-            <span className="pill protected" title="Password-protected">
-              🔒
-            </span>
-          )}
-          {video.expired && (
-            <span className="pill expired" title="The Share Link has expired">
-              expired
-            </span>
-          )}
-          <span className={`pill ${video.state}`}>{video.state}</span>
-        </div>
-        {video.expiresAt != null && !video.expired && (
-          <p className="muted expiry-note">
-            Link expires {new Date(video.expiresAt).toLocaleString()}
-          </p>
-        )}
-        {video.description && <p className="muted video-desc">{video.description}</p>}
-        {video.state === 'processing' && (
-          <div className="prog">
-            <span style={{ width: `${video.progress}%` }} />
+    <li>
+      <Card className="flex flex-col overflow-hidden">
+        <VideoThumb
+          state={video.state}
+          tintIndex={hashIndex(video.slug)}
+          duration={
+            video.durationSeconds != null
+              ? formatDuration(video.durationSeconds)
+              : null
+          }
+        />
+        <div className="flex flex-col gap-2 p-3.5">
+          <div className="flex items-center gap-2">
+            <strong className="min-w-0 flex-1 truncate text-sm">
+              {video.title}
+            </strong>
+            {video.protected && <ProtectedBadge label="Password-protected" />}
+            {video.expired && (
+              <ExpiredBadge label="The Share Link has expired" />
+            )}
+            <StatusPill state={video.state} />
           </div>
-        )}
-        {video.state === 'failed' && (
-          <p className="fail-reason" title={video.failureDetail ?? undefined}>
-            {failureText(video.failureReason)}
-          </p>
-        )}
-        <div className="video-actions">
+          {video.expiresAt != null && !video.expired && (
+            <p className="text-xs text-muted-foreground">
+              Link expires {new Date(video.expiresAt).toLocaleString()}
+            </p>
+          )}
+          {video.description && (
+            <p className="text-xs text-muted-foreground">{video.description}</p>
+          )}
+          {video.state === 'processing' && (
+            <div className="h-1 overflow-hidden rounded bg-background">
+              <div
+                className="h-full bg-warn transition-all duration-300"
+                style={{ width: `${video.progress}%` }}
+              />
+            </div>
+          )}
+          {video.state === 'failed' && (
+            <p
+              className="text-xs text-destructive"
+              title={video.failureDetail ?? undefined}
+            >
+              {failureText(video.failureReason)}
+            </p>
+          )}
+          <div className="video-actions">
           {video.state === 'failed' ? (
             <button
               className="ghost retry"
@@ -752,9 +765,14 @@ function VideoCard(props: {
             {deleting ? 'Deleting…' : 'Delete'}
           </button>
         </div>
-        {retryError && <p className="error">{retryError}</p>}
-        {actionError && <p className="error">{actionError}</p>}
-      </div>
+          {retryError && (
+            <p className="text-sm text-destructive">{retryError}</p>
+          )}
+          {actionError && (
+            <p className="text-sm text-destructive">{actionError}</p>
+          )}
+        </div>
+      </Card>
     </li>
   );
 }
