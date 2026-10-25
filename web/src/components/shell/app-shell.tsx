@@ -80,7 +80,7 @@ function SidebarContent(props: {
                 'flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors',
                 active
                   ? 'bg-accent text-accent-foreground'
-                  : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
+                  : 'bg-transparent text-muted-foreground hover:bg-accent/60 hover:text-foreground',
               )}
             >
               <Icon className="size-4 shrink-0" />
@@ -138,7 +138,7 @@ export function AppShell(props: {
   );
 
   return (
-    <div className="min-h-screen bg-background text-foreground md:grid md:grid-cols-[232px_1fr]">
+    <div className="min-h-screen overflow-x-hidden bg-background text-foreground md:grid md:grid-cols-[232px_1fr]">
       {/* Mobile top bar (portrait) */}
       <header className="flex items-center justify-between border-b border-border px-4 py-3 md:hidden">
         <Brand />
