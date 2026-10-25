@@ -22,6 +22,7 @@ async function main(): Promise<void> {
     transcoder: createFfmpegTranscoder({
       ffmpegPath: config.ffmpegPath,
       ffprobePath: config.ffprobePath,
+      threads: config.ffmpegThreads,
     }),
     config: { ...config, webDistDir },
     logger: true,

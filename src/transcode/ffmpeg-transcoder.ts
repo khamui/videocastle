@@ -48,6 +48,11 @@ export interface FfmpegOptions {
   ffmpegPath?: string;
   /** `ffprobe` binary. */
   ffprobePath?: string;
+  /**
+   * `-threads` to cap each invocation at. Undefined leaves ffmpeg its own
+   * choice, which is every core available (see {@link threadArgs}).
+   */
+  threads?: number;
 }
 
 interface SourceInfo {
@@ -58,6 +63,7 @@ interface SourceInfo {
 export function createFfmpegTranscoder(options: FfmpegOptions = {}): Transcoder {
   const ffmpeg = options.ffmpegPath ?? 'ffmpeg';
   const ffprobe = options.ffprobePath ?? 'ffprobe';
+  const threads = options.threads;
 
   return {
     async checkAvailable(): Promise<TranscoderAvailability> {
@@ -86,8 +92,8 @@ export function createFfmpegTranscoder(options: FfmpegOptions = {}): Transcoder 
 
       const info = await probeSource(ffprobe, request.sourcePath);
 
-      await runFfmpegTranscode(ffmpeg, request, renditionDir, info);
-      await grabPoster(ffmpeg, request, info);
+      await runFfmpegTranscode(ffmpeg, request, renditionDir, info, threads);
+      await grabPoster(ffmpeg, request, info, threads);
 
       return {
         playlistPath: join(RENDITION_DIR, PLAYLIST_NAME),
@@ -171,17 +177,38 @@ async function probeSource(
   return { durationSeconds, isHdr: isHdrTransfer(parsed.streams[0]?.color_transfer) };
 }
 
-async function runFfmpegTranscode(
-  ffmpeg: string,
-  request: TranscodeRequest,
-  renditionDir: string,
-  info: SourceInfo,
-): Promise<void> {
-  const args = [
+/**
+ * `-threads N`, or nothing when the Operator hasn't asked for a cap. ffmpeg's
+ * own default is every core, so an uncapped transcode saturates the box however
+ * low `TRANSCODE_CONCURRENCY` is set.
+ *
+ * `-threads` configures the codec context it precedes, so a cap that is meant
+ * to bound CPU has to be stated twice: once before the input (the decoder) and
+ * once before the output (the encoder). Capping only the encoder still leaves
+ * HEVC decoding of a phone clip free to use every core.
+ */
+function threadArgs(threads: number | undefined): string[] {
+  return threads === undefined ? [] : ['-threads', String(threads)];
+}
+
+/**
+ * The full transcode invocation. Exported so the argument construction — the
+ * part that decides playability and CPU use — is assertable without a real
+ * ffmpeg on PATH.
+ */
+export function buildTranscodeArgs(opts: {
+  sourcePath: string;
+  renditionDir: string;
+  isHdr: boolean;
+  threads?: number;
+}): string[] {
+  return [
     '-nostdin',
     '-y',
+    // Decoder threads for the input that follows.
+    ...threadArgs(opts.threads),
     '-i',
-    request.sourcePath,
+    opts.sourcePath,
     // Take exactly the first video and the first audio (optional, so no-audio
     // Sources still work); drop data/subtitle/extra-audio (e.g. apple_apac).
     '-map',
@@ -189,9 +216,11 @@ async function runFfmpegTranscode(
     '-map',
     '0:a:0?',
     '-vf',
-    buildVideoFilter(info.isHdr),
+    buildVideoFilter(opts.isHdr),
     '-pix_fmt',
     'yuv420p',
+    // Encoder threads for the libx264 output that follows.
+    ...threadArgs(opts.threads),
     '-c:v',
     'libx264',
     '-preset',
@@ -222,12 +251,57 @@ async function runFfmpegTranscode(
     '-hls_playlist_type',
     'vod',
     '-hls_segment_filename',
-    join(renditionDir, 'seg_%03d.ts'),
+    join(opts.renditionDir, 'seg_%03d.ts'),
     '-progress',
     'pipe:1',
     '-nostats',
-    join(renditionDir, PLAYLIST_NAME),
+    join(opts.renditionDir, PLAYLIST_NAME),
   ];
+}
+
+/** The poster grab. Exported alongside {@link buildTranscodeArgs}. */
+export function buildPosterArgs(opts: {
+  sourcePath: string;
+  posterPath: string;
+  atSeconds: number;
+  isHdr: boolean;
+  threads?: number;
+}): string[] {
+  const args = [
+    '-nostdin',
+    '-y',
+    ...threadArgs(opts.threads),
+    '-ss',
+    opts.atSeconds.toFixed(3),
+    '-i',
+    opts.sourcePath,
+  ];
+  // An HDR still must be tone-mapped too, or the poster looks washed out.
+  if (opts.isHdr) args.push('-vf', TONEMAP_CHAIN);
+  args.push(
+    ...threadArgs(opts.threads),
+    '-frames:v',
+    '1',
+    '-q:v',
+    '3',
+    opts.posterPath,
+  );
+  return args;
+}
+
+async function runFfmpegTranscode(
+  ffmpeg: string,
+  request: TranscodeRequest,
+  renditionDir: string,
+  info: SourceInfo,
+  threads: number | undefined,
+): Promise<void> {
+  const args = buildTranscodeArgs({
+    sourcePath: request.sourcePath,
+    renditionDir,
+    isHdr: info.isHdr,
+    threads,
+  });
 
   const onStdout =
     info.durationSeconds > 0 && request.onProgress
@@ -247,12 +321,15 @@ async function grabPoster(
   ffmpeg: string,
   request: TranscodeRequest,
   info: SourceInfo,
+  threads: number | undefined,
 ): Promise<void> {
-  const at = info.durationSeconds > 0 ? info.durationSeconds * 0.1 : 0;
-  const args = ['-nostdin', '-y', '-ss', at.toFixed(3), '-i', request.sourcePath];
-  // An HDR still must be tone-mapped too, or the poster looks washed out.
-  if (info.isHdr) args.push('-vf', TONEMAP_CHAIN);
-  args.push('-frames:v', '1', '-q:v', '3', join(request.outputDir, POSTER_NAME));
+  const args = buildPosterArgs({
+    sourcePath: request.sourcePath,
+    posterPath: join(request.outputDir, POSTER_NAME),
+    atSeconds: info.durationSeconds > 0 ? info.durationSeconds * 0.1 : 0,
+    isHdr: info.isHdr,
+    threads,
+  });
   try {
     await run(ffmpeg, args);
   } catch (err) {

@@ -41,6 +41,21 @@ export interface Config {
   ffmpegPath: string;
   /** `ffprobe` binary to shell out to for probing Sources. */
   ffprobePath: string;
+  /**
+   * How many Videos the in-process worker transcodes in parallel (env
+   * `TRANSCODE_CONCURRENCY`, default 2). Host Configuration: an instance often
+   * shares a VPS with other services, and transcoding is the part of
+   * videocastle that visibly hurts its neighbours, so the server's owner can
+   * turn it down to 1.
+   */
+  transcodeConcurrency: number;
+  /**
+   * `-threads` handed to each `ffmpeg` invocation (env `FFMPEG_THREADS`).
+   * Undefined leaves ffmpeg its own choice, which is every core — so
+   * concurrency alone does not bound CPU: a single transcode can saturate the
+   * machine.
+   */
+  ffmpegThreads: number | undefined;
   /** Length of the per-IP rate-limit window, in milliseconds. */
   rateLimitWindowMs: number;
   /** Max public viewer requests per IP per window (general flood guard). */
@@ -63,6 +78,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     webDistDir: env.WEB_DIST_DIR || undefined,
     ffmpegPath: env.FFMPEG_PATH || 'ffmpeg',
     ffprobePath: env.FFPROBE_PATH || 'ffprobe',
+    transcodeConcurrency: parsePositiveIntOr(env.TRANSCODE_CONCURRENCY, 2),
+    ffmpegThreads: parsePositiveIntOrUndefined(env.FFMPEG_THREADS),
     // Generous general ceiling: HLS playback makes many segment requests, so the
     // default (600/min/IP) stops floods without breaking normal viewing, while
     // password attempts get a much tighter bucket to slow brute-forcing.
@@ -76,4 +93,22 @@ function parseIntOr(value: string | undefined, fallback: number): number {
   if (value === undefined) return fallback;
   const n = Number.parseInt(value, 10);
   return Number.isNaN(n) ? fallback : n;
+}
+
+/**
+ * Like {@link parseIntOr} but refuses anything below 1. A concurrency of 0 or
+ * less would wedge the transcode worker — nothing would ever be pumped — so a
+ * nonsensical value falls back to the default rather than silently disabling
+ * transcoding for an Operator who typed it wrong.
+ */
+function parsePositiveIntOr(value: string | undefined, fallback: number): number {
+  const n = parseIntOr(value, fallback);
+  return n >= 1 ? n : fallback;
+}
+
+/** Unset, or anything not a positive integer, means "don't pass the flag". */
+function parsePositiveIntOrUndefined(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const n = Number.parseInt(value, 10);
+  return Number.isNaN(n) || n < 1 ? undefined : n;
 }

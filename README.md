@@ -129,6 +129,8 @@ accordingly (see ADR-0003).
 | `MAX_UPLOAD_BYTES`        | `2147483648`      | Largest accepted upload (bytes); default ~2 GB.                      |
 | `FFMPEG_PATH`             | `ffmpeg`          | ffmpeg binary used for transcoding.                                  |
 | `FFPROBE_PATH`            | `ffprobe`         | ffprobe binary used for probing Sources.                             |
+| `TRANSCODE_CONCURRENCY`   | `2`               | Videos transcoded in parallel. Lower it to share the host.           |
+| `FFMPEG_THREADS`          | _(ffmpeg's own)_  | `-threads` per ffmpeg invocation; caps CPU per transcode.            |
 | `SESSION_SECRET`          | _(auto)_          | Session-signing secret; generated and persisted on first run.        |
 | `COOKIE_SECURE`           | `false`           | Set `true` when a reverse proxy terminates TLS.                      |
 | `RATE_LIMIT_WINDOW_MS`    | `60000`           | Per-IP rate-limit window, in milliseconds.                           |
@@ -137,6 +139,23 @@ accordingly (see ADR-0003).
 
 Transcoding shells out to `ffmpeg` (bundled in the Docker image). For local
 `npm run dev:server`, install `ffmpeg` on your PATH.
+
+### Sharing the host with other services
+
+Transcoding is the part of videocastle that a VPS's other tenants notice. Two
+knobs bound it, and you generally want both — `TRANSCODE_CONCURRENCY` alone caps
+how many transcodes run, not what one transcode costs, and ffmpeg will happily
+use every core it can see:
+
+```
+TRANSCODE_CONCURRENCY=1
+FFMPEG_THREADS=2
+```
+
+Queued uploads still complete; they just wait their turn, which is usually the
+right trade on a box that is also serving something else. CPU priority itself is
+better left to the platform (`docker --cpus`, systemd's `CPUQuota`, `nice`) than
+configured here.
 
 ## License
 
