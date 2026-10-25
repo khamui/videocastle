@@ -4,10 +4,11 @@ import { cva, type VariantProps } from 'class-variance-authority';
 
 import { cn } from '@/lib/utils';
 
-// Standard shadcn/ui Button. Class-based utilities (specificity 0,1,0) override
-// the legacy element-selector `button {}` rules in styles.css (specificity
-// 0,0,1), so this renders as the Studio Dark button regardless of import order
-// while the rest of the app still runs on legacy CSS during the migration.
+// Standard shadcn/ui Button. Its utility classes live in Tailwind's `utilities`
+// cascade layer, which outranks the `legacy` layer that styles.css (incl. the
+// element-selector `button {}`) is imported into — see index.css — so this
+// renders as the Studio Dark button while the rest of the app still runs on
+// legacy CSS during the migration.
 const buttonVariants = cva(
   "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-60 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 cursor-pointer",
   {

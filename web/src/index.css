@@ -1,40 +1,48 @@
+/*
+ * Cascade layer order (ADR-0008). Tailwind v4 emits its utilities into the
+ * `utilities` layer; legacy hand-written CSS is unlayered and would otherwise
+ * win every conflict against migrated shadcn/ui components. We pull styles.css
+ * into a `legacy` layer placed ABOVE Tailwind's Preflight (`base`) — so legacy
+ * markup keeps its element styling — but BELOW `components`/`utilities`, so a
+ * migrated component's utility classes win. As surfaces migrate, their rules
+ * leave styles.css; when it's empty the layer and import go too.
+ */
+@layer theme, base, legacy, components, utilities;
+
 @import 'tailwindcss';
+@import './styles.css' layer(legacy);
 
 /*
- * Studio Dark design tokens (ADR-0008). The palette comes from the
- * `prototype/look-and-feel` branch; the hex values mirror the legacy
- * `styles.css` :root so the migration is visually continuous. shadcn/ui reads
- * the `--background`/`--primary`/… variables; `@theme inline` exposes each as a
- * Tailwind color utility (bg-background, text-muted-foreground, bg-ok, …).
- *
- * videocastle is dark-only (color-scheme: dark), so the tokens live on :root
- * and `.dark` is mirrored for any component that scopes itself to it.
+ * Studio Dark design tokens (from the prototype/look-and-feel branch). Backing
+ * vars are `--sd-*`-prefixed so they never collide with legacy styles.css vars
+ * (e.g. legacy `--accent` is the brand purple; shadcn's `--accent` is a subtle
+ * hover surface). `@theme inline` exposes each as a Tailwind color utility
+ * (bg-background, text-muted-foreground, bg-ok, …). videocastle is dark-only.
  */
-
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
+  --color-background: var(--sd-background);
+  --color-foreground: var(--sd-foreground);
+  --color-card: var(--sd-card);
+  --color-card-foreground: var(--sd-card-foreground);
+  --color-popover: var(--sd-popover);
+  --color-popover-foreground: var(--sd-popover-foreground);
+  --color-primary: var(--sd-primary);
+  --color-primary-foreground: var(--sd-primary-foreground);
+  --color-secondary: var(--sd-secondary);
+  --color-secondary-foreground: var(--sd-secondary-foreground);
+  --color-muted: var(--sd-muted);
+  --color-muted-foreground: var(--sd-muted-foreground);
+  --color-accent: var(--sd-accent);
+  --color-accent-foreground: var(--sd-accent-foreground);
+  --color-destructive: var(--sd-destructive);
+  --color-destructive-foreground: var(--sd-destructive-foreground);
+  --color-border: var(--sd-border);
+  --color-input: var(--sd-input);
+  --color-ring: var(--sd-ring);
 
-  /* Status colors used by pills/meters in later tickets. */
-  --color-ok: var(--ok);
-  --color-warn: var(--warn);
+  /* Status colors used by pills/meters. */
+  --color-ok: var(--sd-ok);
+  --color-warn: var(--sd-warn);
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -45,53 +53,53 @@
 :root {
   --radius: 0.5rem;
 
-  --background: #0e0f13;
-  --foreground: #e7e9ee;
-  --card: #1a1c23;
-  --card-foreground: #e7e9ee;
-  --popover: #1a1c23;
-  --popover-foreground: #e7e9ee;
-  --primary: #6d6aff;
-  --primary-foreground: #ffffff;
-  --secondary: #1a1c23;
-  --secondary-foreground: #e7e9ee;
-  --muted: #1a1c23;
-  --muted-foreground: #9aa0ad;
-  --accent: #262a35;
-  --accent-foreground: #e7e9ee;
-  --destructive: #ff6b6b;
-  --destructive-foreground: #ffffff;
-  --border: #2b2e38;
-  --input: #2b2e38;
-  --ring: #6d6aff;
+  --sd-background: #0e0f13;
+  --sd-foreground: #e7e9ee;
+  --sd-card: #1a1c23;
+  --sd-card-foreground: #e7e9ee;
+  --sd-popover: #1a1c23;
+  --sd-popover-foreground: #e7e9ee;
+  --sd-primary: #6d6aff;
+  --sd-primary-foreground: #ffffff;
+  --sd-secondary: #1a1c23;
+  --sd-secondary-foreground: #e7e9ee;
+  --sd-muted: #1a1c23;
+  --sd-muted-foreground: #9aa0ad;
+  --sd-accent: #262a35;
+  --sd-accent-foreground: #e7e9ee;
+  --sd-destructive: #ff6b6b;
+  --sd-destructive-foreground: #ffffff;
+  --sd-border: #2b2e38;
+  --sd-input: #2b2e38;
+  --sd-ring: #6d6aff;
 
-  --ok: #36d3a6;
-  --warn: #f0b454;
+  --sd-ok: #36d3a6;
+  --sd-warn: #f0b454;
 
   color-scheme: dark;
 }
 
 .dark {
-  --background: #0e0f13;
-  --foreground: #e7e9ee;
-  --card: #1a1c23;
-  --card-foreground: #e7e9ee;
-  --popover: #1a1c23;
-  --popover-foreground: #e7e9ee;
-  --primary: #6d6aff;
-  --primary-foreground: #ffffff;
-  --secondary: #1a1c23;
-  --secondary-foreground: #e7e9ee;
-  --muted: #1a1c23;
-  --muted-foreground: #9aa0ad;
-  --accent: #262a35;
-  --accent-foreground: #e7e9ee;
-  --destructive: #ff6b6b;
-  --destructive-foreground: #ffffff;
-  --border: #2b2e38;
-  --input: #2b2e38;
-  --ring: #6d6aff;
+  --sd-background: #0e0f13;
+  --sd-foreground: #e7e9ee;
+  --sd-card: #1a1c23;
+  --sd-card-foreground: #e7e9ee;
+  --sd-popover: #1a1c23;
+  --sd-popover-foreground: #e7e9ee;
+  --sd-primary: #6d6aff;
+  --sd-primary-foreground: #ffffff;
+  --sd-secondary: #1a1c23;
+  --sd-secondary-foreground: #e7e9ee;
+  --sd-muted: #1a1c23;
+  --sd-muted-foreground: #9aa0ad;
+  --sd-accent: #262a35;
+  --sd-accent-foreground: #e7e9ee;
+  --sd-destructive: #ff6b6b;
+  --sd-destructive-foreground: #ffffff;
+  --sd-border: #2b2e38;
+  --sd-input: #2b2e38;
+  --sd-ring: #6d6aff;
 
-  --ok: #36d3a6;
-  --warn: #f0b454;
+  --sd-ok: #36d3a6;
+  --sd-warn: #f0b454;
 }
