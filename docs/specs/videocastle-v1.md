@@ -1,8 +1,8 @@
 # Spec: videocastle v1
 
 > Status: draft spec (PRD). Feeds `/to-tickets docs/specs/videocastle-v1.md`.
-> Vocabulary follows `GLOSSARY.md`. Decisions respect `docs/adr/0001`–`0006`.
-> Look & feel and operator/viewer flow were validated in the throwaway prototype on branch `prototype/look-and-feel` (Studio Dark direction, "Model 2" drawer-based flow).
+> Vocabulary follows `GLOSSARY.md`. Decisions respect `docs/adr/0001`–`0009`.
+> Look & feel and operator/viewer flow were validated in the throwaway prototype on branch `prototype/look-and-feel` (Studio Dark direction, "Model 2" drawer-based flow). The UI toolkit (shadcn/ui + Tailwind, ADR-0008) and the feedback split (ADR-0009) are now settled; see **Operator & Viewer UI** under Implementation Decisions.
 
 ## Problem Statement
 
@@ -78,6 +78,15 @@ videocastle is a self-hostable application an **Operator** runs on their own ser
 
 **Architecture & stack** (ADR-0004, ADR-0001). A TypeScript monolith: a Fastify backend that serves the built Vite/React SPA and the JSON/HTTP API, plus an in-process worker that performs transcoding by shelling out to `ffmpeg`. Metadata in embedded SQLite via a low-magic query layer (Drizzle). Media (Sources, HLS segments, posters) on the local filesystem under a configurable data directory. Ships as a single Docker container deployed with Compose; listens on plain HTTP behind the Operator's own TLS-terminating reverse proxy. Explicit, boring, human-maintainable tooling is a hard constraint (ADR-0001): no framework "magic" that can only be understood with an LLM.
 
+**Operator & Viewer UI** (ADR-0008, ADR-0009; prototype `prototype/look-and-feel`, "Studio Dark / Model 2"). The SPA is built with **shadcn/ui on Tailwind CSS** (Radix primitives, component source vendored into the repo), with the Studio Dark palette as Tailwind theme tokens. The app stays **router-less** (manual `pathname` matching for the public `/v` and `/f` viewer paths only); drawers and open-folder state are transient component state, not URL-addressable. The build is **mobile-first / portrait** — the phone layout is primary and the desktop layout is the enhancement.
+
+- **Operator shell.** A two-pane shell: a persistent left sidebar on desktop (brand lockup; nav *Library / Share links / Storage / Settings*; a storage meter; Sign out) that collapses to a **hamburger off-canvas menu** in portrait. Only *Library* is built in v1; *Share links / Storage / Settings* render honest "not built yet" placeholders, and the **storage meter is a visual placeholder** (no storage-accounting endpoint in v1).
+- **Library.** A folder-card grid and a video-card grid (root/loose Videos), each card carrying a status pill (Ready / Processing / Failed / Expired); responsive single-column → grid.
+- **Card → drawer (Model 2).** Clicking a Video or Folder card opens a **detail drawer** — a right-anchored drawer on desktop, a **full-screen sheet** in portrait — holding copy-share-link, a password switch, an expiry select, move-to-Folder, and delete. A Folder's drawer lists its Videos to drill into each Video's drawer. **Preview** opens the real Viewer experience (`/v` or `/f`) in a new tab.
+- **Upload & new-folder.** Upload is a header **button** that opens a **modal** (full-screen sheet in portrait) with a drag/click dropzone — never an always-expanded form. New-folder is likewise a small modal. Destructive confirms are modal dialogs; deleting a Folder forces the ADR-0006 purge-vs-move-to-root choice.
+- **Feedback (ADR-0009).** Success/info → transient bottom toasts; **errors → a persistent, dismissible, copy-pasteable surface** carrying the technical cause and stable `reason` code (ADR-0007), never an auto-dismissing toast. This replaces all native `window.prompt`/`confirm` usage.
+- **Viewer surfaces.** The Watch Page and Folder gallery are restyled to Studio Dark/Tailwind as well (same ADR-0002 opacity and ADR-0003 download-deterrence behaviour — presentation only, no behavioural change).
+
 **Entities (logical, not table DDL).**
 - **Operator credential**: a single username + hashed password (argon2/bcrypt) per instance; created on first run.
 - **Video**: id, title, optional description, Source reference, Rendition reference, poster reference, state, slug, optional password (hashed), optional expiry timestamp, optional owning Folder, created-at, view count.
@@ -148,6 +157,6 @@ Slugs are short, unguessable, URL-safe random strings (~10 chars base62), genera
 
 ## Further Notes
 
-- The look & feel ("Studio Dark") and the operator/viewer flow ("Model 2": clicking a card opens a drawer; a Folder's drawer lists its Videos to drill into; **Preview** opens the real viewer experience in a new tab) were chosen via the throwaway prototype on branch **`prototype/look-and-feel`**. That branch is the primary source for interaction detail; it is deliberately not on `main`.
-- Visual/UI polish is intentionally unsettled — the prototype fixed direction and flow, not final styling.
+- The look & feel ("Studio Dark") and the operator/viewer flow ("Model 2": clicking a card opens a drawer; a Folder's drawer lists its Videos to drill into; **Preview** opens the real viewer experience in a new tab) were chosen via the throwaway prototype on branch **`prototype/look-and-feel`**. That branch remains the primary source for interaction detail; it is deliberately not on `main`.
+- The toolkit and responsive behaviour are now settled (ADR-0008, ADR-0009; see **Operator & Viewer UI** above): shadcn/ui + Tailwind, mobile-first/portrait, toasts-for-success / persistent-copyable-errors. The prototype fixed direction and flow; this spec now fixes the toolkit and the mobile degradation. Fine-grained visual polish (exact spacing, iconography) still follows the prototype's direction rather than a pixel spec.
 - Honesty constraint for user-facing docs: state plainly that nothing short of DRM stops a determined viewer, and that screen capture can never be prevented.
