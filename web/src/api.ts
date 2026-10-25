@@ -5,6 +5,34 @@ export interface OperatorSummary {
   createdAt: number;
 }
 
+/**
+ * An operator-facing API failure that keeps the server's diagnostic structured
+ * (ADR-0007): `reason` is the stable machine code (the body's `error`), `detail`
+ * the raw technical diagnostic (ffmpeg stderr, paths, …). `message` stays the
+ * flat "label: diagnostic" string earlier callers relied on, so this is a
+ * non-breaking enrichment — the Dashboard's error surface reads the fields, but
+ * anything reading `.message` sees exactly what it did before.
+ */
+export class ApiError extends Error {
+  readonly status: number;
+  /** Stable machine `reason` code (server `error`), when the body carried one. */
+  readonly reason?: string;
+  /** Raw technical diagnostic (server `detail`), verbatim, when present. */
+  readonly detail?: string;
+
+  constructor(
+    label: string,
+    opts: { status: number; reason?: string; detail?: string },
+  ) {
+    const diagnostic = opts.detail ?? opts.reason;
+    super(diagnostic ? `${label}: ${diagnostic}` : label);
+    this.name = 'ApiError';
+    this.status = opts.status;
+    this.reason = opts.reason;
+    this.detail = opts.detail;
+  }
+}
+
 async function postJson(url: string, body: unknown): Promise<Response> {
   return fetch(url, {
     method: 'POST',
@@ -24,10 +52,13 @@ async function postJson(url: string, body: unknown): Promise<Response> {
 async function operatorError(res: Response, label: string): Promise<Error> {
   try {
     const body = (await res.json()) as { error?: string; detail?: string };
-    const diagnostic = body.detail ?? body.error;
-    return new Error(diagnostic ? `${label}: ${diagnostic}` : label);
+    return new ApiError(label, {
+      status: res.status,
+      reason: body.error,
+      detail: body.detail,
+    });
   } catch {
-    return new Error(label);
+    return new ApiError(label, { status: res.status });
   }
 }
 

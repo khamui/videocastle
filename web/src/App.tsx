@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { WatchPage } from './WatchPage';
 import { GalleryPage } from './GalleryPage';
 import { Button } from '@/components/ui/button';
+import { FeedbackProvider } from '@/components/feedback/feedback-provider';
+import { useFeedback } from '@/components/feedback/use-feedback';
 import {
   clearFolderPassword,
   clearVideoPassword,
@@ -118,13 +120,15 @@ function OperatorApp() {
       );
     case 'dashboard':
       return (
-        <Dashboard
-          operator={screen.operator}
-          onSignOut={async () => {
-            await signOut();
-            setScreen({ kind: 'sign-in' });
-          }}
-        />
+        <FeedbackProvider>
+          <Dashboard
+            operator={screen.operator}
+            onSignOut={async () => {
+              await signOut();
+              setScreen({ kind: 'sign-in' });
+            }}
+          />
+        </FeedbackProvider>
       );
   }
 }
@@ -512,6 +516,7 @@ function VideoCard(props: {
   onChanged: () => void;
 }) {
   const { video } = props;
+  const { notify, reportError } = useFeedback();
   const [copied, setCopied] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
@@ -525,7 +530,9 @@ function VideoCard(props: {
       await retryVideo(video.slug);
       props.onChanged();
     } catch (err) {
-      setRetryError(err instanceof Error ? err.message : 'Retry failed');
+      // Operator error → persistent, copy-pasteable surface with the reason
+      // code and raw diagnostic (ADR-0007/0009), never a transient toast.
+      reportError(err, { title: 'Retry failed' });
     } finally {
       setRetrying(false);
     }
@@ -641,6 +648,8 @@ function VideoCard(props: {
       await navigator.clipboard.writeText(url);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
+      // Transient success confirmation (ADR-0009).
+      notify('Link copied to clipboard');
     } catch {
       setCopied(false);
     }
