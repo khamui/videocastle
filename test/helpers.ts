@@ -152,10 +152,15 @@ export async function buildTestApp(
   const transcoder = createFakeTranscoder();
   if (overrides.transcoderAvailable === false) transcoder.available = false;
   const mediaDir = mkdtempSync(join(tmpdir(), 'vc-media-'));
-  const config = loadConfig({ MEDIA_DIR: mediaDir, ...overrides.env });
+  // The same object is handed to `buildApp`, so the Settings → Server view
+  // reports provenance against the environment the test actually set rather
+  // than the one the suite happens to run under.
+  const env = { MEDIA_DIR: mediaDir, ...overrides.env };
+  const config = loadConfig(env);
 
   const app = await buildApp({
     db: db.db,
+    env,
     clock,
     slugGenerator,
     transcoder,

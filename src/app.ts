@@ -40,6 +40,12 @@ export interface AppDeps {
   transcoder: Transcoder;
   config: Config;
   /**
+   * The environment `config` was resolved from, so the Settings → Server view
+   * can say whether each value came from the environment or a default. Falls
+   * back to `process.env`; tests pass the same object they built `config` with.
+   */
+  env?: NodeJS.ProcessEnv;
+  /**
    * Enable the Fastify logger. Off by default (quiet tests); the production
    * entrypoint turns it on so that, e.g., a transcode failure is visible rather
    * than silently leaving a Video in the Failed state.
@@ -162,6 +168,10 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     transcoding,
     maxUploadBytes: deps.config.maxUploadBytes,
     storage: storageGuard,
+    quotaWarnPercent: deps.config.quotaWarnPercent,
+    dbPath: deps.config.dbPath,
+    config: deps.config,
+    env: deps.env ?? process.env,
   });
 
   // The public Viewer surface (no session): watch a Video via its Share Link,

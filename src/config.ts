@@ -42,6 +42,14 @@ export interface Config {
    */
   minFreeDiskBytes: number;
   /**
+   * Where the Dashboard's warning band starts, as a percentage of the Quota
+   * (env `QUOTA_WARN_PERCENT`, default 80). Configurable because 80% is a guess
+   * about someone else's disk: on a 20 GB quota it fires with 4 GB left, on a
+   * 2 TB quota with 400 GB left — too late or absurdly early depending on how
+   * big the Operator's uploads are.
+   */
+  quotaWarnPercent: number;
+  /**
    * Session-signing secret override. When set (via env), it takes precedence
    * over the secret auto-generated and persisted in the database on first run.
    */
@@ -95,6 +103,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     maxUploadBytes: parseBytesOr(env.MAX_UPLOAD_BYTES, 2 * 1024 ** 3),
     storageQuotaBytes: parseBytes(env.STORAGE_QUOTA_BYTES),
     minFreeDiskBytes: parseBytesOr(env.MIN_FREE_DISK_BYTES, 1024 ** 3),
+    quotaWarnPercent: parsePercentOr(env.QUOTA_WARN_PERCENT, 80),
     sessionSecret: env.SESSION_SECRET || undefined,
     cookieSecure: env.COOKIE_SECURE === 'true',
     webDistDir: env.WEB_DIST_DIR || undefined,
@@ -126,6 +135,16 @@ function parseIntOr(value: string | undefined, fallback: number): number {
 function parsePositiveIntOr(value: string | undefined, fallback: number): number {
   const n = parseIntOr(value, fallback);
   return n >= 1 ? n : fallback;
+}
+
+/**
+ * A percentage in 1–99. A warning at 0 would fire on an empty instance and one
+ * at 100 would fire only once writes are already being refused, so neither is a
+ * warning threshold — both fall back to the default.
+ */
+function parsePercentOr(value: string | undefined, fallback: number): number {
+  const n = parseIntOr(value, fallback);
+  return n >= 1 && n <= 99 ? n : fallback;
 }
 
 /** Unset, or anything not a positive integer, means "don't pass the flag". */

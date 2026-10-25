@@ -10,7 +10,9 @@ import {
 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
+import { formatBytes } from '@/lib/format';
 import { Button } from '@/components/ui/button';
+import type { StorageReport } from '../../api';
 
 // The operator shell's navigation sections. Only `library` is built in v1
 // (ADR-0008 / spec: Operator & Viewer UI); the rest render placeholders.
@@ -35,24 +37,81 @@ function Brand() {
   );
 }
 
-// Placeholder storage meter. There is no storage-accounting endpoint in v1, so
-// this is deliberately not live data (spec: Operator & Viewer UI).
-function StorageMeter() {
+/** Bar colour by pressure: amber from the warning band, red once writes refuse. */
+const BAR = {
+  ok: 'bg-primary',
+  warning: 'bg-warn',
+  full: 'bg-destructive',
+} as const;
+
+const LABEL = {
+  ok: 'text-muted-foreground',
+  warning: 'text-warn',
+  full: 'text-destructive',
+} as const;
+
+/**
+ * Live storage meter.
+ *
+ * With no Quota set there is no denominator to draw a bar against, so it shows
+ * what is held and what is free rather than a bar at some arbitrary fill — a
+ * near-full-looking bar on an uncapped instance would be a lie. Over 100% the
+ * bar stays full and turns red, and the figure beside it tells the truth
+ * (ADR-0011).
+ */
+function StorageMeter(props: { storage: StorageReport | null }) {
+  const { storage } = props;
+
+  if (!storage) {
+    return (
+      <div className="rounded-lg border border-border bg-background/40 px-3 py-2.5">
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5">
+            <HardDrive className="size-3.5" />
+            Storage
+          </span>
+          <span className="font-mono">—</span>
+        </div>
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-border" />
+      </div>
+    );
+  }
+
+  const capped = storage.quotaBytes !== null;
+  const percent = storage.usedPercent ?? 0;
+
   return (
     <div className="rounded-lg border border-border bg-background/40 px-3 py-2.5">
-      <div className="flex items-center justify-between text-xs text-muted-foreground">
-        <span className="inline-flex items-center gap-1.5">
+      <div className="flex items-center justify-between gap-2 text-xs">
+        <span className="inline-flex items-center gap-1.5 text-muted-foreground">
           <HardDrive className="size-3.5" />
           Storage
         </span>
-        <span className="font-mono">— / — GB</span>
+        <span className={cn('shrink-0 font-mono', LABEL[storage.pressure])}>
+          {capped ? `${percent}%` : formatBytes(storage.totalBytes)}
+        </span>
       </div>
-      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-border">
-        <div className="h-full w-1/3 rounded-full bg-muted-foreground/40" />
-      </div>
-      <p className="mt-1.5 text-[10px] text-muted-foreground/70">
-        Metering coming soon — not live
-      </p>
+
+      {capped ? (
+        <>
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-border">
+            <div
+              className={cn('h-full rounded-full', BAR[storage.pressure])}
+              style={{ width: `${Math.min(100, percent)}%` }}
+            />
+          </div>
+          <p className={cn('mt-1.5 font-mono text-[10px]', LABEL[storage.pressure])}>
+            {formatBytes(storage.totalBytes)} / {formatBytes(storage.quotaBytes!)}
+            {percent > 100 && ' — over the ceiling'}
+          </p>
+        </>
+      ) : (
+        <p className="mt-1.5 text-[10px] text-muted-foreground/70">
+          No quota set
+          {storage.freeDiskBytes !== null &&
+            ` · ${formatBytes(storage.freeDiskBytes)} free on disk`}
+        </p>
+      )}
     </div>
   );
 }
@@ -60,6 +119,7 @@ function StorageMeter() {
 function SidebarContent(props: {
   operator: string;
   section: Section;
+  storage: StorageReport | null;
   onNavigate: (s: Section) => void;
   onSignOut: () => void;
 }) {
@@ -91,7 +151,7 @@ function SidebarContent(props: {
       </nav>
 
       <div className="mt-auto flex flex-col gap-3">
-        <StorageMeter />
+        <StorageMeter storage={props.storage} />
         <div className="flex items-center justify-between gap-2">
           <span
             className="truncate text-xs text-muted-foreground"
@@ -117,6 +177,8 @@ function SidebarContent(props: {
 export function AppShell(props: {
   operator: string;
   section: Section;
+  /** Live storage figures for the sidebar meter; null until first load. */
+  storage: StorageReport | null;
   onNavigate: (s: Section) => void;
   onSignOut: () => void;
   children: React.ReactNode;
@@ -132,6 +194,7 @@ export function AppShell(props: {
     <SidebarContent
       operator={props.operator}
       section={props.section}
+      storage={props.storage}
       onNavigate={navigate}
       onSignOut={props.onSignOut}
     />

@@ -12,6 +12,9 @@ import {
   type StorageAllowance,
   type StorageGuard,
 } from '../media/storage-guard';
+import { buildStorageReport } from '../media/storage-report';
+import { hostConfigReport } from '../system/host-config-report';
+import type { Config } from '../config';
 import type { SessionManager } from '../auth/session';
 import type { TranscodingStatus } from '../system/transcoding-status';
 import type { VideoRepo } from './video-repo';
@@ -62,13 +65,21 @@ export interface VideoRouteOptions extends FastifyPluginOptions {
   maxUploadBytes: number;
   /** The Quota and free-disk ceilings that gate writes (ADR-0011). */
   storage: StorageGuard;
+  /** Where the Dashboard's storage warning band starts. */
+  quotaWarnPercent: number;
+  /** The SQLite file, reported (and excluded from the Quota) in the storage view. */
+  dbPath: string;
+  /** The whole resolved configuration, for the read-only Settings → Server view. */
+  config: Config;
+  /** The environment it was resolved from, so each value's provenance is known. */
+  env: NodeJS.ProcessEnv;
 }
 
 export async function registerVideoRoutes(
   app: FastifyInstance,
   options: VideoRouteOptions,
 ): Promise<void> {
-  const { session, repo, folderRepo, worker, store, slugGenerator, clock, transcoding, maxUploadBytes, storage } =
+  const { session, repo, folderRepo, worker, store, slugGenerator, clock, transcoding, maxUploadBytes, storage, quotaWarnPercent, dbPath, config, env } =
     options;
   const requireOperator = { preHandler: session.requireOperator } as const;
 
@@ -103,7 +114,7 @@ export async function registerVideoRoutes(
     const status = await transcoding.refresh();
     // A `SUM()` of figures recorded at write time — not a walk of the media
     // directory, which would make this endpoint cost O(Library) per poll.
-    const storage = await repo.storageTotals();
+    const totals = await repo.storageTotals();
     return {
       transcoding: {
         available: status.available,
@@ -111,14 +122,22 @@ export async function registerVideoRoutes(
         // ADR-0007: tell the Operator the real reason it's unavailable.
         error: status.error ?? null,
       },
-      storage: {
-        sourceBytes: storage.sourceBytes,
-        renditionBytes: storage.renditionBytes,
-        posterBytes: storage.posterBytes,
-        totalBytes: totalBytes(storage),
-      },
+      storage: await buildStorageReport({
+        totals,
+        guard: storage,
+        warnPercent: quotaWarnPercent,
+        dbPath,
+      }),
     };
   });
+
+  // The Host Configuration, with each value's provenance. Its own endpoint
+  // rather than part of `/api/status`: that one is polled while a Video
+  // transcodes, and configuration fixed at process start has no business being
+  // re-sent every three seconds.
+  app.get('/api/server-config', requireOperator, () => ({
+    sections: hostConfigReport(config, env),
+  }));
 
   // Upload a Video. The file streams straight to disk (never buffered whole in
   // memory); the response returns the moment the Source is saved — in the

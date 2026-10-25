@@ -165,6 +165,7 @@ accordingly (see ADR-0003).
 | `FFPROBE_PATH`            | `ffprobe`         | ffprobe binary used for probing Sources.                             |
 | `STORAGE_QUOTA_BYTES`     | _(unlimited)_     | Ceiling on total media bytes. Refuses writes; never deletes.          |
 | `MIN_FREE_DISK_BYTES`     | `1GiB`            | Free space that must remain on the media filesystem.                 |
+| `QUOTA_WARN_PERCENT`      | `80`              | Where the Dashboard's storage warning band starts.                   |
 | `TRANSCODE_CONCURRENCY`   | `2`               | Videos transcoded in parallel. Lower it to share the host.           |
 | `FFMPEG_THREADS`          | _(ffmpeg's own)_  | `-threads` per ffmpeg invocation; caps CPU per transcode.            |
 | `SESSION_SECRET`          | _(auto)_          | Session-signing secret; generated and persisted on first run.        |
@@ -202,6 +203,15 @@ upload leaves no partial Source behind.
 pruning, no "oldest first". **Playback is never gated either**: a full disk costs
 you the ability to add Videos, never a Viewer the ability to watch one you
 already shared a link to.
+
+The Dashboard shows all of this: a live meter in the sidebar, a **Storage**
+section breaking usage down with your Videos listed largest-first, and a
+read-only **Settings → Server** view stating every configured value and whether
+it came from the environment or a built-in default. From `QUOTA_WARN_PERCENT`
+(80% by default) upward the meter turns amber and a standing banner appears;
+past the ceiling both turn red. 80% is a guess about someone else's disk — on a
+20 GB quota it fires with 4 GB left, on a 2 TB quota with 400 GB left — so it is
+configurable.
 
 Two consequences worth knowing. Lowering the Quota below what is already stored
 is a legal state — nothing is removed, writes refuse, and the reported usage is
