@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { WatchPage } from './WatchPage';
 import { GalleryPage } from './GalleryPage';
 import { FeedbackProvider } from '@/components/feedback/feedback-provider';
-import { useFeedback } from '@/components/feedback/use-feedback';
 import {
   AppShell,
   SectionPlaceholder,
@@ -15,25 +14,20 @@ import {
   StatusPill,
   VideoThumb,
 } from '@/components/library/video-visuals';
+import { VideoDrawer } from '@/components/library/video-drawer';
 import { UploadDialog } from '@/components/library/upload-dialog';
 import { NewFolderDialog } from '@/components/library/new-folder-dialog';
 import {
   clearFolderPassword,
-  clearVideoPassword,
   deleteFolder,
-  deleteVideo,
   getMe,
   getNeedsSetup,
   getStatus,
   listFolders,
   listVideos,
-  moveVideoToFolder,
-  retryVideo,
   setFolderExpiry,
   setFolderPassword,
   setup,
-  setVideoExpiry,
-  setVideoPassword,
   signIn,
   signOut,
   type FolderSummary,
@@ -472,231 +466,73 @@ function VideoCard(props: {
   onChanged: () => void;
 }) {
   const { video } = props;
-  const { notify, reportError } = useFeedback();
-  const [copied, setCopied] = useState(false);
-  const [retrying, setRetrying] = useState(false);
-  const [retryError, setRetryError] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
-
-  async function retry(): Promise<void> {
-    setRetryError(null);
-    setRetrying(true);
-    try {
-      await retryVideo(video.slug);
-      props.onChanged();
-    } catch (err) {
-      // Operator error → persistent, copy-pasteable surface with the reason
-      // code and raw diagnostic (ADR-0007/0009), never a transient toast.
-      reportError(err, { title: 'Retry failed' });
-    } finally {
-      setRetrying(false);
-    }
-  }
-
-  async function togglePassword(): Promise<void> {
-    setActionError(null);
-    try {
-      if (video.protected) {
-        if (!window.confirm(`Remove the password on “${video.title}”? Anyone with the link will be able to watch it.`)) {
-          return;
-        }
-        await clearVideoPassword(video.slug);
-      } else {
-        const password = window.prompt(`Set a password for “${video.title}”. Viewers will be prompted for it before playback.`);
-        if (password === null || password.trim().length === 0) return;
-        await setVideoPassword(video.slug, password.trim());
-      }
-      props.onChanged();
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Could not update password');
-    }
-  }
-
-  async function editExpiry(): Promise<void> {
-    setActionError(null);
-    // Minimal control: expiry is entered as whole days from now. Blank clears
-    // it (never expires); 0 expires the link immediately. The server stores the
-    // absolute instant and evaluates it against its own Clock.
-    const current = video.expiresAt
-      ? `Currently expires ${new Date(video.expiresAt).toLocaleString()}.\n\n`
-      : '';
-    const answer = window.prompt(
-      `${current}Expire “${video.title}” in how many days from now? ` +
-        `Leave blank to clear the expiry; enter 0 to expire now.`,
-    );
-    if (answer === null) return; // cancelled
-    const trimmed = answer.trim();
-    let expiresAt: number | null;
-    if (trimmed.length === 0) {
-      expiresAt = null;
-    } else {
-      const days = Number(trimmed);
-      if (!Number.isFinite(days) || days < 0) {
-        setActionError('Enter a number of days (0 or more), or leave blank to clear.');
-        return;
-      }
-      expiresAt = Date.now() + days * 24 * 60 * 60 * 1000;
-    }
-    try {
-      await setVideoExpiry(video.slug, expiresAt);
-      props.onChanged();
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Could not update expiry');
-    }
-  }
-
-  async function move(): Promise<void> {
-    setActionError(null);
-    // Minimal picker: list the Folders by number; blank moves to the root.
-    const menu = props.folders
-      .map((f, i) => `${i + 1}. ${f.name}`)
-      .join('\n');
-    const answer = window.prompt(
-      `Move “${video.title}” to which Folder?\n\n${menu || '(no Folders yet)'}\n\n` +
-        `Enter a number, or leave blank to move it to the Library root.`,
-    );
-    if (answer === null) return; // cancelled
-    const trimmed = answer.trim();
-    let folderSlug: string | null;
-    if (trimmed.length === 0) {
-      folderSlug = null;
-    } else {
-      const index = Number(trimmed);
-      const target = props.folders[index - 1];
-      if (!Number.isInteger(index) || !target) {
-        setActionError('Enter one of the listed Folder numbers, or leave blank for the root.');
-        return;
-      }
-      folderSlug = target.slug;
-    }
-    try {
-      await moveVideoToFolder(video.slug, folderSlug);
-      props.onChanged();
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Could not move Video');
-    }
-  }
-
-  async function remove(): Promise<void> {
-    // Deletion is irreversible — purges the Source and Rendition and kills the
-    // Share Link (spec: story 20). Confirm before it happens so it can't be an
-    // accident; the window.confirm is the only gate, deliberately.
-    const confirmed = window.confirm(
-      `Delete “${video.title}”? This permanently removes the video and its ` +
-        `Share Link stops working immediately. This can’t be undone.`,
-    );
-    if (!confirmed) return;
-    setActionError(null);
-    setDeleting(true);
-    try {
-      await deleteVideo(video.slug);
-      props.onChanged();
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Delete failed');
-      setDeleting(false);
-    }
-  }
-
-  async function copyLink(): Promise<void> {
-    const url = `${window.location.origin}${video.shareUrl}`;
-    try {
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-      // Transient success confirmation (ADR-0009).
-      notify('Link copied to clipboard');
-    } catch {
-      setCopied(false);
-    }
-  }
+  const [open, setOpen] = useState(false);
 
   return (
     <li>
-      <Card className="flex flex-col overflow-hidden">
-        <VideoThumb
-          state={video.state}
-          tintIndex={hashIndex(video.slug)}
-          duration={
-            video.durationSeconds != null
-              ? formatDuration(video.durationSeconds)
-              : null
-          }
-        />
-        <div className="flex flex-col gap-2 p-3.5">
-          <div className="flex items-center gap-2">
-            <strong className="min-w-0 flex-1 truncate text-sm">
-              {video.title}
-            </strong>
-            {video.protected && <ProtectedBadge label="Password-protected" />}
-            {video.expired && (
-              <ExpiredBadge label="The Share Link has expired" />
-            )}
-            <StatusPill state={video.state} />
-          </div>
-          {video.expiresAt != null && !video.expired && (
-            <p className="text-xs text-muted-foreground">
-              Link expires {new Date(video.expiresAt).toLocaleString()}
-            </p>
-          )}
-          {video.description && (
-            <p className="text-xs text-muted-foreground">{video.description}</p>
-          )}
-          {video.state === 'processing' && (
-            <div className="h-1 overflow-hidden rounded bg-background">
-              <div
-                className="h-full bg-warn transition-all duration-300"
-                style={{ width: `${video.progress}%` }}
-              />
+      <Card className="overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="flex w-full flex-col bg-transparent p-0 text-left text-foreground transition-colors hover:bg-accent/20"
+        >
+          <VideoThumb
+            state={video.state}
+            tintIndex={hashIndex(video.slug)}
+            duration={
+              video.durationSeconds != null
+                ? formatDuration(video.durationSeconds)
+                : null
+            }
+          />
+          <div className="flex flex-col gap-2 p-3.5">
+            <div className="flex items-center gap-2">
+              <strong className="min-w-0 flex-1 truncate text-sm">
+                {video.title}
+              </strong>
+              {video.protected && <ProtectedBadge label="Password-protected" />}
+              {video.expired && (
+                <ExpiredBadge label="The Share Link has expired" />
+              )}
+              <StatusPill state={video.state} />
             </div>
-          )}
-          {video.state === 'failed' && (
-            <p
-              className="text-xs text-destructive"
-              title={video.failureDetail ?? undefined}
-            >
-              {failureText(video.failureReason)}
-            </p>
-          )}
-          <div className="video-actions">
-          {video.state === 'failed' ? (
-            <button
-              className="ghost retry"
-              onClick={() => void retry()}
-              disabled={retrying}
-            >
-              {retrying ? 'Retrying…' : 'Retry'}
-            </button>
-          ) : (
-            <button className="ghost copy" onClick={() => void copyLink()}>
-              {copied ? 'Copied!' : 'Copy link'}
-            </button>
-          )}
-          <button className="ghost password" onClick={() => void togglePassword()}>
-            {video.protected ? 'Remove password' : 'Set password'}
-          </button>
-          <button className="ghost expiry" onClick={() => void editExpiry()}>
-            {video.expiresAt != null ? 'Edit expiry' : 'Set expiry'}
-          </button>
-          <button className="ghost move" onClick={() => void move()}>
-            Move
-          </button>
-          <button
-            className="ghost danger delete"
-            onClick={() => void remove()}
-            disabled={deleting}
-          >
-            {deleting ? 'Deleting…' : 'Delete'}
-          </button>
-        </div>
-          {retryError && (
-            <p className="text-sm text-destructive">{retryError}</p>
-          )}
-          {actionError && (
-            <p className="text-sm text-destructive">{actionError}</p>
-          )}
-        </div>
+            {video.expiresAt != null && !video.expired && (
+              <p className="text-xs text-muted-foreground">
+                Link expires {new Date(video.expiresAt).toLocaleString()}
+              </p>
+            )}
+            {video.description && (
+              <p className="text-xs text-muted-foreground">
+                {video.description}
+              </p>
+            )}
+            {video.state === 'processing' && (
+              <div className="h-1 overflow-hidden rounded bg-background">
+                <div
+                  className="h-full bg-warn transition-all duration-300"
+                  style={{ width: `${video.progress}%` }}
+                />
+              </div>
+            )}
+            {video.state === 'failed' && (
+              <p
+                className="text-xs text-destructive"
+                title={video.failureDetail ?? undefined}
+              >
+                {failureText(video.failureReason)}
+              </p>
+            )}
+          </div>
+        </button>
       </Card>
+      <VideoDrawer
+        video={video}
+        folders={props.folders}
+        tintIndex={hashIndex(video.slug)}
+        onChanged={props.onChanged}
+        open={open}
+        onOpenChange={setOpen}
+      />
     </li>
   );
 }
