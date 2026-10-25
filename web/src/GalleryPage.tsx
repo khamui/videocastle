@@ -5,6 +5,7 @@ import {
   type FolderView,
   type GalleryTile,
 } from './api';
+import { Button } from '@/components/ui/button';
 
 type OpenFolder = Extract<FolderView, { protected: false }>;
 
@@ -45,7 +46,11 @@ export function GalleryPage(props: { slug: string }) {
 
   switch (state.kind) {
     case 'loading':
-      return <GalleryShell>Loading…</GalleryShell>;
+      return (
+        <GalleryShell>
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        </GalleryShell>
+      );
     case 'unavailable':
       return <Unavailable />;
     case 'locked':
@@ -77,7 +82,7 @@ function FolderPasswordPrompt(props: {
   return (
     <GalleryShell>
       <form
-        className="watch-note watch-unlock"
+        className="flex w-full max-w-[320px] flex-col items-stretch gap-3 text-center"
         onSubmit={async (e) => {
           e.preventDefault();
           setError(null);
@@ -93,20 +98,23 @@ function FolderPasswordPrompt(props: {
           }
         }}
       >
-        <h1>This folder is protected</h1>
-        <p className="muted">Enter the password to see what’s inside.</p>
+        <h1 className="text-xl font-semibold">This folder is protected</h1>
+        <p className="text-sm text-muted-foreground">
+          Enter the password to see what’s inside.
+        </p>
         <input
           type="password"
+          className="rounded-lg border border-input bg-background px-3 py-2.5 text-center text-base text-foreground outline-none focus:border-ring"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           autoComplete="off"
           autoFocus
           required
         />
-        {error && <p className="error">{error}</p>}
-        <button type="submit" disabled={busy || password.length === 0}>
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        <Button type="submit" disabled={busy || password.length === 0}>
           {busy ? 'Unlocking…' : 'Unlock'}
-        </button>
+        </Button>
       </form>
     </GalleryShell>
   );
@@ -116,11 +124,15 @@ function Gallery(props: { slug: string; folder: OpenFolder }) {
   const { slug, folder } = props;
   return (
     <GalleryShell wide>
-      <h1 className="gallery-title">{folder.name}</h1>
+      <h1 className="m-0 w-full max-w-[960px] text-2xl font-semibold">
+        {folder.name}
+      </h1>
       {folder.videos.length === 0 ? (
-        <p className="muted gallery-empty">There’s nothing to watch here yet.</p>
+        <p className="w-full max-w-[960px] text-sm text-muted-foreground">
+          There’s nothing to watch here yet.
+        </p>
       ) : (
-        <ul className="gallery-grid">
+        <ul className="grid w-full max-w-[960px] list-none grid-cols-[repeat(auto-fill,minmax(min(14rem,100%),1fr))] gap-[18px] p-0">
           {folder.videos.map((tile) => (
             <Tile key={tile.slug} folderSlug={slug} tile={tile} />
           ))}
@@ -135,9 +147,9 @@ function Tile(props: { folderSlug: string; tile: GalleryTile }) {
   const href = `/f/${encodeURIComponent(folderSlug)}/${encodeURIComponent(tile.slug)}`;
   return (
     <li>
-      <a className="gallery-tile" href={href}>
+      <a className="group flex flex-col gap-2 text-inherit no-underline" href={href}>
         <div
-          className="gallery-thumb"
+          className="relative aspect-video rounded-lg border border-border bg-[#1b1f28] bg-cover bg-center transition-colors group-hover:border-primary"
           style={
             tile.posterUrl
               ? { backgroundImage: `url(${tile.posterUrl})` }
@@ -145,15 +157,22 @@ function Tile(props: { folderSlug: string; tile: GalleryTile }) {
           }
         >
           {tile.protected && (
-            <span className="gallery-lock" title="Password-protected">
+            <span
+              className="absolute left-2 top-2 rounded bg-black/70 px-1.5 py-0.5 text-xs"
+              title="Password-protected"
+            >
               🔒
             </span>
           )}
           {tile.durationSeconds != null && (
-            <span className="duration">{formatDuration(tile.durationSeconds)}</span>
+            <span className="absolute bottom-2 right-2 rounded bg-black/70 px-1.5 py-0.5 text-[11px] tabular-nums text-white">
+              {formatDuration(tile.durationSeconds)}
+            </span>
           )}
         </div>
-        <span className="gallery-tile-title">{tile.title}</span>
+        <span className="overflow-hidden text-ellipsis whitespace-nowrap text-sm">
+          {tile.title}
+        </span>
       </a>
     </li>
   );
@@ -162,9 +181,9 @@ function Tile(props: { folderSlug: string; tile: GalleryTile }) {
 function Unavailable() {
   return (
     <GalleryShell>
-      <div className="watch-note">
-        <h1>Not available</h1>
-        <p className="muted">
+      <div className="flex w-full max-w-[420px] flex-col items-center gap-3 text-center">
+        <h1 className="text-xl font-semibold">Not available</h1>
+        <p className="leading-relaxed text-muted-foreground">
           This link doesn’t point to a folder that can be viewed. It may have been
           removed, or the link may be incorrect.
         </p>
@@ -175,7 +194,13 @@ function Unavailable() {
 
 function GalleryShell(props: { children: React.ReactNode; wide?: boolean }) {
   return (
-    <main className={`watch${props.wide ? ' watch-wide' : ''}`}>{props.children}</main>
+    <main
+      className={`flex min-h-screen w-full flex-col items-center gap-4 p-6 ${
+        props.wide ? 'justify-start pt-10' : 'justify-center'
+      }`}
+    >
+      {props.children}
+    </main>
   );
 }
 
