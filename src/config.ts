@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { parseBytesOr } from './system/bytes';
+import { parseBytes, parseBytesOr } from './system/bytes';
 
 /**
  * Runtime configuration, resolved from the environment at process start.
@@ -23,6 +23,24 @@ export interface Config {
    * partial Source behind (see src/videos/routes.ts).
    */
   maxUploadBytes: number;
+  /**
+   * Ceiling on the total bytes this instance's media may occupy (env
+   * `STORAGE_QUOTA_BYTES`, accepts size suffixes). Undefined means unlimited,
+   * which is the default: a fresh install must work with no env file, and an
+   * Operator who has not thought about a quota has not asked for one.
+   *
+   * Reaching it refuses uploads and transcode retries. It never deletes
+   * anything, and playback is never gated (ADR-0011).
+   */
+  storageQuotaBytes: number | undefined;
+  /**
+   * Free space that must remain on the media filesystem (env
+   * `MIN_FREE_DISK_BYTES`, default 1 GiB). On by default, unlike the Quota,
+   * because a filesystem with no room left can wedge or corrupt SQLite — that
+   * is a correctness risk rather than a capacity preference, so it needs a safe
+   * default rather than an opt-in.
+   */
+  minFreeDiskBytes: number;
   /**
    * Session-signing secret override. When set (via env), it takes precedence
    * over the secret auto-generated and persisted in the database on first run.
@@ -75,6 +93,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     dbPath: env.DB_PATH ?? join(dataDir, 'videocastle.db'),
     mediaDir: env.MEDIA_DIR ?? join(dataDir, 'media'),
     maxUploadBytes: parseBytesOr(env.MAX_UPLOAD_BYTES, 2 * 1024 ** 3),
+    storageQuotaBytes: parseBytes(env.STORAGE_QUOTA_BYTES),
+    minFreeDiskBytes: parseBytesOr(env.MIN_FREE_DISK_BYTES, 1024 ** 3),
     sessionSecret: env.SESSION_SECRET || undefined,
     cookieSecure: env.COOKIE_SECURE === 'true',
     webDistDir: env.WEB_DIST_DIR || undefined,

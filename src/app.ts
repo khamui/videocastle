@@ -10,6 +10,7 @@ import { OperatorRepo } from './auth/operator-repo';
 import { createSessionManager } from './auth/session';
 import { registerAuthRoutes } from './auth/routes';
 import { MediaStore } from './media/media-store';
+import { createStorageGuard } from './media/storage-guard';
 import { VideoRepo } from './videos/video-repo';
 import { FolderRepo } from './videos/folder-repo';
 import { createTranscodeWorker, type VideoWorker } from './videos/transcode-worker';
@@ -103,6 +104,24 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   );
   app.decorate('videoWorker', worker);
 
+  // The ceilings the server's owner set. Reaching one refuses writes; it never
+  // deletes, and never gates playback (ADR-0011).
+  const storageGuard = createStorageGuard({
+    repo: videoRepo,
+    mediaDir: deps.config.mediaDir,
+    limits: {
+      quotaBytes: deps.config.storageQuotaBytes,
+      minFreeDiskBytes: deps.config.minFreeDiskBytes,
+    },
+  });
+  app.log.info(
+    {
+      quota: deps.config.storageQuotaBytes ?? 'unlimited',
+      minFreeDisk: deps.config.minFreeDiskBytes,
+    },
+    'storage ceilings',
+  );
+
   // Probe transcoding availability once at boot so uploads can be gated and the
   // Dashboard warned; log the result loudly since a missing ffmpeg is the most
   // common operational failure.
@@ -142,6 +161,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     clock: deps.clock,
     transcoding,
     maxUploadBytes: deps.config.maxUploadBytes,
+    storage: storageGuard,
   });
 
   // The public Viewer surface (no session): watch a Video via its Share Link,

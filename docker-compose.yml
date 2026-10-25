@@ -12,6 +12,8 @@ services:
       # MAX_UPLOAD_BYTES: '2147483648'   # largest accepted upload (bytes); ~2 GB default
       # RATE_LIMIT_MAX: '600'            # per-IP viewer request ceiling per window
       # RATE_LIMIT_PASSWORD_MAX: '10'    # per-IP password-attempt ceiling per window
+      # STORAGE_QUOTA_BYTES: '200GiB'    # ceiling on total media; unlimited when unset
+      # MIN_FREE_DISK_BYTES: '1GiB'      # free space to keep on the media filesystem
       # TRANSCODE_CONCURRENCY: '1'       # parallel transcodes; lower to share the host
       # FFMPEG_THREADS: '2'              # -threads per transcode; caps CPU per job
     volumes:
