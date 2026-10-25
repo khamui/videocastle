@@ -216,7 +216,9 @@ export function ShareLinkFields(props: {
               value={pwd}
               onChange={(e) => setPwd(e.target.value)}
               placeholder="New password"
-              className="h-9 min-w-0 flex-1 rounded-md border border-border bg-background px-3 text-sm"
+              // 16px on small screens: iOS Safari force-zooms the viewport when
+              // a focused input is under 16px, which yanks the drawer about.
+              className="h-9 min-w-0 flex-1 rounded-md border border-border bg-background px-3 text-base sm:text-sm"
             />
             <Button
               size="sm"

@@ -24,11 +24,14 @@ const buttonVariants = cva(
         ghost: 'bg-transparent hover:bg-accent hover:text-accent-foreground',
         link: 'bg-transparent text-primary underline-offset-4 hover:underline',
       },
+      // Every size states its padding on both axes, including the zeroes: the
+      // legacy `button {}` element rule in styles.css supplies `11px 14px` to
+      // any side left unset, which deforms the button's content box.
       size: {
         default: 'h-10 px-4 py-2',
-        sm: 'h-9 rounded-md px-3',
-        lg: 'h-11 rounded-md px-6',
-        icon: 'h-10 w-10',
+        sm: 'h-9 rounded-md px-3 py-0',
+        lg: 'h-11 rounded-md px-6 py-0',
+        icon: 'h-10 w-10 p-0',
       },
     },
     defaultVariants: {
