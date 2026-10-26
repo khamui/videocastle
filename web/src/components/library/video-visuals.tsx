@@ -19,14 +19,21 @@ export function VideoThumb(props: {
   duration: string | null;
 }) {
   const style: React.CSSProperties =
-    props.state === 'processing'
+    props.state === 'uploading'
       ? {
+          // Same "in progress" stripes as processing, in the brand hue so the
+          // upload phase reads as distinct from transcoding.
           backgroundImage:
-            'repeating-linear-gradient(45deg,#2b2f3a,#2b2f3a 10px,#333845 10px,#333845 20px)',
+            'repeating-linear-gradient(45deg,#2b2f3a,#2b2f3a 10px,#35306a 10px,#35306a 20px)',
         }
-      : props.state === 'failed'
-        ? { backgroundColor: '#3a2a2e' }
-        : { backgroundImage: THUMB_GRADIENTS[props.tintIndex] };
+      : props.state === 'processing'
+        ? {
+            backgroundImage:
+              'repeating-linear-gradient(45deg,#2b2f3a,#2b2f3a 10px,#333845 10px,#333845 20px)',
+          }
+        : props.state === 'failed'
+          ? { backgroundColor: '#3a2a2e' }
+          : { backgroundImage: THUMB_GRADIENTS[props.tintIndex] };
   return (
     <div className="relative aspect-video" style={style}>
       {props.duration && (
@@ -40,6 +47,7 @@ export function VideoThumb(props: {
 
 const STATUS_STYLES: Record<string, string> = {
   ready: 'bg-ok/15 text-ok',
+  uploading: 'bg-primary/15 text-primary',
   processing: 'bg-warn/15 text-warn',
   failed: 'bg-destructive/15 text-destructive',
   expired: 'bg-destructive/15 text-destructive',

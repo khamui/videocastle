@@ -1,8 +1,6 @@
 import { useRef, useState } from 'react';
 import { Upload } from 'lucide-react';
 
-import { uploadVideo } from '@/api';
-import { useFeedback } from '@/components/feedback/use-feedback';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -17,21 +15,20 @@ import {
 import { cn } from '@/lib/utils';
 
 /**
- * `+ Upload` header button → modal with a drag/click dropzone. The upload
- * returns immediately and transcodes in the background (unchanged behavior);
- * success toasts, failure uses the persistent error surface (ADR-0009).
+ * `+ Upload` header button → modal with a drag/click dropzone. Submitting hands
+ * the file to the Library (`onStart`) and closes immediately: the upload runs
+ * with a real progress bar on an optimistic card, so the Operator can keep
+ * working or queue more. Success/failure surface there, not in this dialog.
  */
 export function UploadDialog(props: {
   disabled?: boolean;
-  onUploaded: () => void;
+  onStart: (input: { title: string; description: string; file: File }) => void;
 }) {
-  const { notify, reportError } = useFeedback();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [dragOver, setDragOver] = useState(false);
-  const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   function reset() {
@@ -39,26 +36,14 @@ export function UploadDialog(props: {
     setDescription('');
     setFile(null);
     setDragOver(false);
-    setBusy(false);
     if (inputRef.current) inputRef.current.value = '';
   }
 
-  async function submit() {
+  function submit() {
     if (!file || title.trim().length === 0) return;
-    setBusy(true);
-    try {
-      await uploadVideo({ title, description, file });
-      props.onUploaded();
-      notify('Upload started · transcoding');
-    } catch (err) {
-      reportError(err, { title: 'Upload failed' });
-    } finally {
-      // Close on both paths — including failure — so the persistent error card
-      // isn't left hidden behind the full-screen dialog on mobile (ADR-0008).
-      // `reset()` also clears `busy`.
-      setOpen(false);
-      reset();
-    }
+    props.onStart({ title: title.trim(), description, file });
+    setOpen(false);
+    reset();
   }
 
   return (
@@ -79,8 +64,8 @@ export function UploadDialog(props: {
         <DialogHeader>
           <DialogTitle>Upload a video</DialogTitle>
           <DialogDescription>
-            It transcodes to HLS in the background — the Share Link works right
-            away.
+            It uploads with a progress bar, then transcodes to HLS in the
+            background — the Share Link works right away.
           </DialogDescription>
         </DialogHeader>
 
@@ -145,12 +130,10 @@ export function UploadDialog(props: {
             <Button variant="outline">Cancel</Button>
           </DialogClose>
           <Button
-            onClick={() => void submit()}
-            disabled={
-              props.disabled || busy || !file || title.trim().length === 0
-            }
+            onClick={submit}
+            disabled={props.disabled || !file || title.trim().length === 0}
           >
-            {busy ? 'Uploading…' : 'Start upload'}
+            Start upload
           </Button>
         </DialogFooter>
       </DialogContent>
