@@ -185,6 +185,7 @@ export async function registerVideoRoutes(
 
     let title: string | undefined;
     let description: string | null = null;
+    let folderSlug: string | null = null;
     let created: Video | undefined;
 
     try {
@@ -194,6 +195,9 @@ export async function registerVideoRoutes(
           else if (part.fieldname === 'description') {
             const value = String(part.value).trim();
             description = value.length > 0 ? value : null;
+          } else if (part.fieldname === 'folderSlug') {
+            const value = String(part.value).trim();
+            folderSlug = value.length > 0 ? value : null;
           }
           continue;
         }
@@ -204,10 +208,20 @@ export async function registerVideoRoutes(
           return reply.code(400).send({ error: 'missing_title' });
         }
 
+        // An optional target Folder (fields arrive before the file): resolve it
+        // now so the Video is created already filed, never in a transient root
+        // state. An unknown slug is the Operator's error to see (ADR-0007).
+        let folder: Folder | undefined;
+        if (folderSlug !== null) {
+          folder = await folderRepo.findBySlug(folderSlug);
+          if (!folder) return folderNotFound(reply, folderSlug);
+        }
+
         created = await repo.create({
           slug: slugGenerator.next(),
           title,
           description,
+          folderId: folder ? folder.id : null,
           createdAt: clock.now(),
         });
         await store.ensureVideoDir(created.id);

@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { Upload } from 'lucide-react';
 
+import type { FolderSummary } from '@/api';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -12,6 +13,13 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 
 /**
@@ -22,12 +30,20 @@ import { cn } from '@/lib/utils';
  */
 export function UploadDialog(props: {
   disabled?: boolean;
-  onStart: (input: { title: string; description: string; file: File }) => void;
+  folders: FolderSummary[];
+  onStart: (input: {
+    title: string;
+    description: string;
+    file: File;
+    folderSlug: string | null;
+  }) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [file, setFile] = useState<File | null>(null);
+  // 'root' is the sentinel for the Library root (no Folder).
+  const [folderValue, setFolderValue] = useState('root');
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -35,13 +51,19 @@ export function UploadDialog(props: {
     setTitle('');
     setDescription('');
     setFile(null);
+    setFolderValue('root');
     setDragOver(false);
     if (inputRef.current) inputRef.current.value = '';
   }
 
   function submit() {
     if (!file || title.trim().length === 0) return;
-    props.onStart({ title: title.trim(), description, file });
+    props.onStart({
+      title: title.trim(),
+      description,
+      file,
+      folderSlug: folderValue === 'root' ? null : folderValue,
+    });
     setOpen(false);
     reset();
   }
@@ -124,6 +146,23 @@ export function UploadDialog(props: {
             className="rounded-md border border-input bg-background px-3 py-2 text-foreground focus-visible:border-ring focus-visible:outline-none"
           />
         </label>
+
+        <div className="flex flex-col gap-1.5 text-sm">
+          Folder <span className="text-muted-foreground">(optional)</span>
+          <Select value={folderValue} onValueChange={setFolderValue}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="root">Library (no folder)</SelectItem>
+              {props.folders.map((f) => (
+                <SelectItem key={f.slug} value={f.slug}>
+                  {f.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
 
         <DialogFooter>
           <DialogClose asChild>

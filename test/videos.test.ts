@@ -125,6 +125,38 @@ describe('uploading a Video', () => {
     const list = await current.app.inject({ method: 'GET', url: '/api/videos' });
     expect(list.statusCode).toBe(401);
   });
+
+  it('files the Video into a Folder when a folderSlug is supplied', async () => {
+    const { app, jar, transcoder } = await signedIn();
+    transcoder.auto = false;
+    const folder = await app.inject({
+      method: 'POST',
+      url: '/api/folders',
+      cookies: jar,
+      payload: { name: 'Trips' },
+    });
+    const folderSlug = folder.json().folder.slug as string;
+
+    const res = await uploadVideo(app, jar, {
+      fields: { title: 'Beach', folderSlug },
+      file: { fieldname: 'file', filename: 'clip.mp4', content: 'bytes' },
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(res.json().video.folderSlug).toBe(folderSlug);
+  });
+
+  it('rejects an upload into an unknown Folder', async () => {
+    const { app, jar, transcoder } = await signedIn();
+    transcoder.auto = false;
+
+    const res = await uploadVideo(app, jar, {
+      fields: { title: 'Orphan', folderSlug: 'does-not-exist' },
+      file: { fieldname: 'file', filename: 'clip.mp4', content: 'bytes' },
+    });
+
+    expect(res.statusCode).toBe(404);
+  });
 });
 
 describe('transcoding to Ready', () => {

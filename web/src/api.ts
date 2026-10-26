@@ -615,11 +615,14 @@ export function uploadVideo(input: {
   title: string;
   description: string;
   file: File;
+  /** Target Folder slug, or null/omitted for the Library root. */
+  folderSlug?: string | null;
   onProgress?: (fraction: number) => void;
 }): UploadHandle {
   const form = new FormData();
   form.append('title', input.title);
   if (input.description.trim()) form.append('description', input.description);
+  if (input.folderSlug) form.append('folderSlug', input.folderSlug);
   form.append('file', input.file);
 
   const xhr = new XMLHttpRequest();

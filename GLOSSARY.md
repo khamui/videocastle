@@ -52,6 +52,10 @@ _Avoid_: admin panel, console
 The Viewer-facing page reached through a Share Link, where a ready Video plays.
 _Avoid_: player page, view page
 
+**Gallery**:
+The Viewer-facing page a Folder's Share Link opens: the grid of that Folder's Videos, from which a Viewer opens any one's Watch Page. The Folder analogue of the Watch Page. Distinct from the Folder itself (the group of Videos) — the Gallery is how a Viewer sees it.
+_Avoid_: overview, grid, album
+
 **Poster**:
 The single still frame grabbed from a Source and shown on the Watch Page before playback begins.
 _Avoid_: thumbnail, preview, cover

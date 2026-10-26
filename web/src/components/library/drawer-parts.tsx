@@ -14,10 +14,18 @@ import { Switch } from '@/components/ui/switch';
 
 export const DAY = 24 * 60 * 60 * 1000;
 
+// `value` is a day count; the control computes `now + value·DAY`. Months/years
+// are fixed day counts (90/180/365), not calendar-accurate — the drawer works
+// in days and the approximation is fine for a Share Link horizon.
 const EXPIRY_PRESETS = [
   { value: '1', label: '24 hours' },
   { value: '3', label: '3 days' },
   { value: '7', label: '7 days' },
+  { value: '14', label: '2 weeks' },
+  { value: '28', label: '4 weeks' },
+  { value: '90', label: '3 months' },
+  { value: '180', label: '6 months' },
+  { value: '365', label: '1 year' },
 ];
 
 /** A labelled control group, the drawers' one layout unit. */
