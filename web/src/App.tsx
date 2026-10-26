@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react';
 import { WatchPage } from './WatchPage';
 import { GalleryPage } from './GalleryPage';
 import { FeedbackProvider } from '@/components/feedback/feedback-provider';
+import { useFeedback } from '@/components/feedback/use-feedback';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import { formatBytes } from '@/lib/format';
 import {
   AppShell,
@@ -31,6 +34,8 @@ import {
   setup,
   signIn,
   signOut,
+  uploadVideo,
+  UploadAborted,
   type FolderSummary,
   type OperatorSummary,
   type ServerStatus,
@@ -43,6 +48,22 @@ type Screen =
   | { kind: 'setup' }
   | { kind: 'sign-in' }
   | { kind: 'dashboard'; operator: OperatorSummary };
+
+/**
+ * A client-only tile for an upload in flight, shown in the Videos grid before
+ * the real (server) card exists. `progress` is a 0..1 fraction; `finishing` is
+ * the tail after the browser has sent every byte but the server hasn't yet
+ * responded (written the Source + created the row), so the bar shouldn't look
+ * stuck at an exact 100%.
+ */
+interface UploadTile {
+  id: string;
+  title: string;
+  description: string | null;
+  progress: number;
+  phase: 'uploading' | 'finishing';
+  abort: () => void;
+}
 
 /** `/v/<slug>` is the public Viewer Share Link; everything else is the Dashboard. */
 function watchSlug(pathname: string): string | null {
@@ -144,10 +165,13 @@ function Dashboard(props: {
   operator: OperatorSummary;
   onSignOut: () => Promise<void>;
 }) {
+  const { notify, reportError } = useFeedback();
   const [videos, setVideos] = useState<VideoSummary[] | null>(null);
   const [folders, setFolders] = useState<FolderSummary[]>([]);
   const [status, setStatus] = useState<ServerStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Uploads in flight, shown as optimistic tiles until the real card appears.
+  const [uploads, setUploads] = useState<UploadTile[]>([]);
   // Which shell nav section is active. Only `library` is built in v1.
   const [section, setSection] = useState<Section>('library');
 
@@ -178,6 +202,70 @@ function Dashboard(props: {
     return () => clearInterval(id);
   }, [anyProcessing]);
 
+  // Guard against a refresh/navigation that would abort an in-flight upload —
+  // the very thing that silently killed uploads before (a reload cancels the
+  // request). Best-effort: iOS Safari largely ignores `beforeunload`.
+  useEffect(() => {
+    if (uploads.length === 0) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [uploads.length]);
+
+  // Start an upload: add an optimistic tile, stream the file with real byte
+  // progress, then swap the tile for the real (Processing) card on success —
+  // or drop it (and report, unless the Operator cancelled) on failure. Several
+  // may run at once; each tile is keyed by its own id.
+  function startUpload(input: {
+    title: string;
+    description: string;
+    file: File;
+  }): void {
+    const id = `up-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const handle = uploadVideo({
+      ...input,
+      onProgress: (fraction) =>
+        setUploads((prev) =>
+          prev.map((u) =>
+            u.id === id
+              ? {
+                  ...u,
+                  progress: fraction,
+                  phase: fraction >= 1 ? 'finishing' : 'uploading',
+                }
+              : u,
+          ),
+        ),
+    });
+    setUploads((prev) => [
+      ...prev,
+      {
+        id,
+        title: input.title,
+        description: input.description.trim() || null,
+        progress: 0,
+        phase: 'uploading',
+        abort: handle.abort,
+      },
+    ]);
+    handle.done.then(
+      () => {
+        setUploads((prev) => prev.filter((u) => u.id !== id));
+        // The real card now appears as Processing; the transcode poll takes over.
+        void refresh();
+        notify('Upload complete · transcoding');
+      },
+      (err) => {
+        setUploads((prev) => prev.filter((u) => u.id !== id));
+        if (err instanceof UploadAborted) return; // operator cancelled — not an error
+        reportError(err, { title: 'Upload failed' });
+      },
+    );
+  }
+
   // The Library root lists Folders and the unfiled Videos side by side; a
   // Folder's own Videos live in its drawer, not in this grid.
   const unfiled = (videos ?? []).filter((v) => v.folderSlug === null);
@@ -200,7 +288,7 @@ function Dashboard(props: {
               (status != null && !status.transcoding.available) ||
               storage?.pressure === 'full'
             }
-            onUploaded={() => void refresh()}
+            onStart={startUpload}
           />
         </div>
       </header>
@@ -251,12 +339,21 @@ function Dashboard(props: {
 
       {videos === null ? (
         <p className="text-muted-foreground">Loading…</p>
-      ) : unfiled.length === 0 ? (
+      ) : unfiled.length === 0 && uploads.length === 0 ? (
         <p className="rounded-xl border border-dashed border-border p-12 text-center text-muted-foreground">
           No unfiled Videos. Upload one to get a Share Link.
         </p>
       ) : (
         <ul className="grid list-none grid-cols-1 gap-4 p-0 sm:grid-cols-2 xl:grid-cols-3">
+          {/* Uploads in flight lead the grid; each swaps for its real card on
+              completion (or disappears on cancel/failure). */}
+          {uploads.map((upload) => (
+            <UploadCard
+              key={upload.id}
+              upload={upload}
+              onCancel={upload.abort}
+            />
+          ))}
           {unfiled.map((video) => (
             <VideoCard
               key={video.slug}
@@ -374,6 +471,59 @@ function FolderCard(props: {
         open={open}
         onOpenChange={setOpen}
       />
+    </li>
+  );
+}
+
+/**
+ * An upload in flight, shaped like a {@link VideoCard} so it slots into the same
+ * grid, but with the brand-tinted "uploading" treatment (distinct from the amber
+ * transcoding bar), a live byte-progress bar, and a real Cancel. It isn't
+ * clickable — there's no Video to open yet. Once the upload completes it's
+ * replaced by the real card; Cancel aborts the request and drops the tile.
+ */
+function UploadCard(props: { upload: UploadTile; onCancel: () => void }) {
+  const { upload } = props;
+  const finishing = upload.phase === 'finishing';
+  const pct = Math.round(upload.progress * 100);
+
+  return (
+    <li>
+      <Card className="overflow-hidden">
+        <div className="flex w-full flex-col text-left">
+          <VideoThumb state="uploading" tintIndex={0} duration={null} />
+          <div className="flex flex-col gap-2 p-3.5">
+            <div className="flex items-center gap-2">
+              <strong className="min-w-0 flex-1 truncate text-sm">
+                {upload.title}
+              </strong>
+              <StatusPill state="uploading" />
+            </div>
+            {upload.description && (
+              <p className="text-xs text-muted-foreground">
+                {upload.description}
+              </p>
+            )}
+            <div className="h-1 overflow-hidden rounded bg-background">
+              <div
+                className={cn(
+                  'h-full bg-primary transition-all duration-300',
+                  finishing && 'animate-pulse',
+                )}
+                style={{ width: `${finishing ? 100 : pct}%` }}
+              />
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs tabular-nums text-muted-foreground">
+                {finishing ? 'Finishing…' : `Uploading… ${pct}%`}
+              </span>
+              <Button variant="outline" size="sm" onClick={props.onCancel}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Card>
     </li>
   );
 }

@@ -46,23 +46,25 @@ async function postJson(url: string, body: unknown): Promise<Response> {
 }
 
 /**
- * Turns an operator-facing API error response into an Error, surfacing the
- * server's technical `detail` (or, failing that, its stable `error` code)
- * rather than a genericised message — the Dashboard is an Operator surface, so
- * it states the real cause (ADR-0007). `label` is the human lead-in; the raw
- * diagnostic is appended when the body carries one.
+ * Builds an operator-facing {@link ApiError} from a raw response status and
+ * body text, surfacing the server's technical `detail` (or, failing that, its
+ * stable `error` code) rather than a genericised message — the Dashboard is an
+ * Operator surface, so it states the real cause (ADR-0007). A non-JSON body
+ * (e.g. an nginx error page) falls back to the bare status. Shared by the
+ * `fetch` callers and the XHR-based upload so both map errors identically.
  */
-async function operatorError(res: Response, label: string): Promise<Error> {
+function apiErrorFromBody(status: number, bodyText: string, label: string): ApiError {
   try {
-    const body = (await res.json()) as { error?: string; detail?: string };
-    return new ApiError(label, {
-      status: res.status,
-      reason: body.error,
-      detail: body.detail,
-    });
+    const body = JSON.parse(bodyText) as { error?: string; detail?: string };
+    return new ApiError(label, { status, reason: body.error, detail: body.detail });
   } catch {
-    return new ApiError(label, { status: res.status });
+    return new ApiError(label, { status });
   }
+}
+
+/** Turns an operator-facing API error `Response` into an Error (see {@link apiErrorFromBody}). */
+async function operatorError(res: Response, label: string): Promise<Error> {
+  return apiErrorFromBody(res.status, await res.text(), label);
 }
 
 export async function getNeedsSetup(): Promise<boolean> {
@@ -583,27 +585,69 @@ export async function deleteVideo(slug: string): Promise<void> {
   if (!res.ok) throw await operatorError(res, 'Delete failed');
 }
 
+/** Thrown on an upload's promise when the caller aborted it — a cancel, not a failure to report. */
+export class UploadAborted extends Error {
+  constructor() {
+    super('Upload aborted');
+    this.name = 'UploadAborted';
+  }
+}
+
+/** A running upload: its eventual result, and a handle to cancel it. */
+export interface UploadHandle {
+  /** The created (Processing) Video, or a rejection: ApiError, a network Error, or {@link UploadAborted}. */
+  readonly done: Promise<VideoSummary>;
+  /** Cancel the in-flight upload; `done` then rejects with {@link UploadAborted}. */
+  abort(): void;
+}
+
 /**
- * Uploads a Video. The title and description fields are appended before the
- * file so the server knows them by the time the file stream arrives. Resolves
- * with the created (Processing) Video.
+ * Uploads a Video, reporting real byte progress and offering a true cancel.
+ *
+ * Uses XMLHttpRequest, not fetch: fetch exposes no upload-progress events, so
+ * XHR's `upload.onprogress` is the only cross-browser way to drive a real
+ * progress bar (and its `abort()` gives an actual cancel — a plain fetch has
+ * neither). `onProgress` receives a 0..1 fraction. The title and description
+ * fields are appended before the file so the server knows them by the time the
+ * file stream arrives.
  */
-export async function uploadVideo(input: {
+export function uploadVideo(input: {
   title: string;
   description: string;
   file: File;
-}): Promise<VideoSummary> {
+  onProgress?: (fraction: number) => void;
+}): UploadHandle {
   const form = new FormData();
   form.append('title', input.title);
   if (input.description.trim()) form.append('description', input.description);
   form.append('file', input.file);
 
-  const res = await fetch('/api/videos', {
-    method: 'POST',
-    credentials: 'same-origin',
-    body: form,
+  const xhr = new XMLHttpRequest();
+  const done = new Promise<VideoSummary>((resolve, reject) => {
+    xhr.open('POST', '/api/videos');
+    xhr.withCredentials = true; // carry the same-origin session cookie
+    xhr.upload.addEventListener('progress', (e) => {
+      if (e.lengthComputable) input.onProgress?.(e.loaded / e.total);
+    });
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const data = JSON.parse(xhr.responseText) as { video: VideoSummary };
+          resolve(data.video);
+        } catch {
+          reject(new ApiError('Upload failed', { status: xhr.status }));
+        }
+      } else {
+        reject(apiErrorFromBody(xhr.status, xhr.responseText, 'Upload failed'));
+      }
+    });
+    // Transport-level failure (connection dropped, offline): no HTTP status to show.
+    xhr.addEventListener('error', () =>
+      reject(new Error('Upload failed: the network connection was lost')),
+    );
+    xhr.addEventListener('abort', () => reject(new UploadAborted()));
+    xhr.send(form);
   });
-  if (!res.ok) throw await operatorError(res, 'Upload failed');
-  const data = (await res.json()) as { video: VideoSummary };
-  return data.video;
+
+  return { done, abort: () => xhr.abort() };
 }
