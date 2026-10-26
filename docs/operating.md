@@ -12,11 +12,38 @@ videocastle ships as a single container. With Docker Compose:
 docker compose up --build -d
 ```
 
-It listens on **plain HTTP** at `http://localhost:8080` (map the port to your
-host as you like). All state — media, the SQLite database, and the
-auto-generated session secret — lives under `DATA_DIR` (`/data` in the image)
-and persists in the `videocastle-data` volume across restarts and image
-upgrades.
+It listens on **plain HTTP** at `http://localhost:8080`. All state — media, the
+SQLite database, and the auto-generated session secret — lives under `DATA_DIR`
+(`/data` in the image) and persists in the `videocastle-data` volume across
+restarts and image upgrades.
+
+### When 8080 is already taken
+
+A box that already runs something on 8080 fails at `docker compose up` with a
+message that reads like a crash but is Docker refusing to bind the host port:
+
+```
+failed to bind port 0.0.0.0:8080/tcp: Error starting userland proxy:
+listen tcp4 0.0.0.0:8080: bind: address already in use
+```
+
+The container never started, so nothing is wrong with your install. Find what
+holds the port:
+
+```sh
+sudo ss -ltnp 'sport = :8080'    # or: sudo lsof -i :8080
+docker ps --filter publish=8080  # in case it's an older container of your own
+```
+
+Then either stop that, or move videocastle's **host** port — the container keeps
+listening on 8080 internally, so nothing else changes:
+
+```sh
+echo 'HOST_PORT=8090' >> .env
+docker compose up -d
+```
+
+Point your reverse proxy at the new port (`reverse_proxy 127.0.0.1:8090`).
 
 ## Behind your reverse proxy (TLS)
 

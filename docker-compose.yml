@@ -4,7 +4,11 @@ services:
   videocastle:
     build: .
     ports:
-      - '8080:8080'
+      # Container side is fixed; the host side is yours to choose. A VPS that
+      # already runs something on 8080 — another service, a reverse proxy —
+      # otherwise fails to start with a bind error that reads like a crash.
+      # Override with HOST_PORT in a .env beside this file, or in the shell.
+      - '${HOST_PORT:-8080}:8080'
     environment:
       DATA_DIR: /data
       # COOKIE_SECURE: 'true'            # set when a reverse proxy terminates TLS
