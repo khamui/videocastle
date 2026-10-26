@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
 import {
+  getFolder,
   getFolderVideo,
   getWatch,
   unlockFolder,
   unlockWatch,
+  type GalleryTile,
   type WatchView,
 } from './api';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 
 type State =
   | { kind: 'loading' }
@@ -86,7 +89,13 @@ export function WatchPage(props: { slug: string; folderSlug?: string }) {
     case 'watch':
       switch (state.view.state) {
         case 'ready':
-          return <Player view={state.view} backHref={backHref} />;
+          return (
+            <Player
+              view={state.view}
+              backHref={backHref}
+              folderSlug={folderSlug}
+            />
+          );
         case 'processing':
           return <Preparing title={state.view.title} backHref={backHref} />;
         case 'failed':
@@ -202,12 +211,38 @@ function PasswordPrompt(props: {
   );
 }
 
+/**
+ * Frame-relative zoom steps (Q4). `1` is Fit (the whole frame); the rest crop
+ * into the centre, which is how a Viewer gets close on a portrait segment that
+ * sits pillarboxed inside a landscape frame. Resets to Fit per Video — each one
+ * is a fresh page load (the rail navigates), so the initial state does that for
+ * free.
+ */
+const ZOOM_LEVELS = [1, 1.5, 2.5, 2.75, 3] as const;
+const zoomLabel = (z: number): string => (z === 1 ? 'Fit' : `${Math.round(z * 100)}%`);
+
+/**
+ * The one shared player, used by every surface (standalone `/v/<slug>` and an
+ * in-Folder `/f/<slug>/<vslug>`) so playback never diverges. It sizes its box to
+ * the video's real aspect ratio — read from the Poster's intrinsic dimensions,
+ * which match the Rendition — so a portrait Video fills the screen instead of
+ * being pillarboxed in a fixed 16:9 box, capped at 80vh. An in-Folder view also
+ * gets a sibling rail for one-tap switching.
+ */
 function Player(props: {
   view: Extract<WatchView, { state: 'ready' }>;
   backHref?: string;
+  folderSlug?: string;
 }) {
   const { view } = props;
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [zoom, setZoom] = useState<number>(1);
+  // The video's width/height ratio, and 80% of the viewport height in px, so the
+  // box fits any aspect without pillar/letterboxing the box itself.
+  const [aspect, setAspect] = useState<number | null>(null);
+  const [maxBoxHeight, setMaxBoxHeight] = useState(() =>
+    typeof window === 'undefined' ? 720 : window.innerHeight * 0.8,
+  );
 
   useEffect(() => {
     const video = videoRef.current;
@@ -228,13 +263,45 @@ function Player(props: {
     // No HLS support at all — leave the poster up; there is nothing to play.
   }, [view.playlistUrl]);
 
+  // Read the true aspect cheaply off the Poster (shown before playback anyway),
+  // so the box is correctly shaped without a server round-trip or schema change.
+  useEffect(() => {
+    let cancelled = false;
+    const img = new Image();
+    img.onload = () => {
+      if (!cancelled && img.naturalWidth > 0 && img.naturalHeight > 0) {
+        setAspect(img.naturalWidth / img.naturalHeight);
+      }
+    };
+    img.src = view.posterUrl;
+    return () => {
+      cancelled = true;
+    };
+  }, [view.posterUrl]);
+
+  useEffect(() => {
+    const onResize = () => setMaxBoxHeight(window.innerHeight * 0.8);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  // Fit the box to whichever limit binds first: 960px wide, or 80vh tall.
+  const boxWidth = aspect ? Math.min(960, aspect * maxBoxHeight) : undefined;
+
   return (
     <WatchShell wide backHref={props.backHref}>
-      <div className="relative w-full max-w-[960px]">
-        <div className="aspect-video w-full overflow-hidden rounded-xl border border-border bg-black">
+      <div className="relative mx-auto w-full max-w-[960px]">
+        <div
+          className="relative mx-auto max-w-full overflow-hidden rounded-xl border border-border bg-black"
+          style={{
+            width: boxWidth ? `${boxWidth}px` : '100%',
+            aspectRatio: String(aspect ?? 16 / 9),
+          }}
+        >
           <video
             ref={videoRef}
-            className="block h-full w-full bg-black"
+            className="block h-full w-full bg-black object-contain transition-transform duration-200"
+            style={{ transform: `scale(${zoom})` }}
             controls
             playsInline
             poster={view.posterUrl}
@@ -246,12 +313,30 @@ function Player(props: {
             disableRemotePlayback
             onContextMenu={(e) => e.preventDefault()}
           />
+          {/* Zoom control (Q4): frame-relative steps, top-left so it clears the
+              download badge; always visible, resets to Fit on each Video. */}
+          <div className="absolute left-3 top-3 flex overflow-hidden rounded-md bg-black/70 text-xs text-white/90 backdrop-blur-sm">
+            {ZOOM_LEVELS.map((z) => (
+              <button
+                key={z}
+                type="button"
+                onClick={() => setZoom(z)}
+                aria-pressed={zoom === z}
+                className={cn(
+                  'px-2 py-1 tabular-nums transition-colors',
+                  zoom === z ? 'bg-white/25 text-white' : 'hover:bg-white/10',
+                )}
+              >
+                {zoomLabel(z)}
+              </button>
+            ))}
+          </div>
+          {/* Download-deterrence badge (ADR-0003): states plainly that saving is
+              discouraged, with no pretense that capture is prevented. */}
+          <span className="pointer-events-none absolute right-3 top-3 flex items-center gap-1 rounded-md bg-black/70 px-2 py-1 text-xs text-white/90 backdrop-blur-sm">
+            ⤓ Download disabled
+          </span>
         </div>
-        {/* Download-deterrence badge (ADR-0003): states plainly that saving is
-            discouraged, with no pretense that capture is prevented. */}
-        <span className="pointer-events-none absolute right-3 top-3 flex items-center gap-1 rounded-md bg-black/70 px-2 py-1 text-xs text-white/90 backdrop-blur-sm">
-          ⤓ Download disabled
-        </span>
       </div>
       <h1 className="mt-1 w-full max-w-[960px] text-xl font-semibold">
         {view.title}
@@ -261,7 +346,77 @@ function Player(props: {
           {view.description}
         </p>
       )}
+      {props.folderSlug && (
+        <SiblingRail folderSlug={props.folderSlug} currentSlug={view.slug} />
+      )}
     </WatchShell>
+  );
+}
+
+/**
+ * The in-Folder filmstrip (Model A): the Folder's other Videos as thumbnails, so
+ * a Viewer can hop between them without going back to the Gallery first. Plain
+ * `<a>` links — switching is a full page load into this same shared Player (no
+ * client router). Hidden when the Folder has only the one Video.
+ */
+function SiblingRail(props: { folderSlug: string; currentSlug: string }) {
+  const { folderSlug, currentSlug } = props;
+  const [tiles, setTiles] = useState<GalleryTile[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getFolder(folderSlug)
+      .then((folder) => {
+        if (!cancelled && folder && !folder.protected) setTiles(folder.videos);
+      })
+      .catch(() => {
+        /* a rail is a convenience; its absence is not worth an error */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [folderSlug]);
+
+  if (!tiles || tiles.length <= 1) return null;
+
+  return (
+    <div className="w-full max-w-[960px]">
+      <ul className="flex list-none gap-3 overflow-x-auto p-0 pb-1">
+        {tiles.map((tile) => {
+          const current = tile.slug === currentSlug;
+          return (
+            <li key={tile.slug} className="shrink-0">
+              <a
+                href={
+                  current
+                    ? undefined
+                    : `/f/${encodeURIComponent(folderSlug)}/${encodeURIComponent(tile.slug)}`
+                }
+                aria-current={current ? 'true' : undefined}
+                className="block w-32 no-underline"
+              >
+                <div
+                  className={cn(
+                    'aspect-video rounded-md bg-[#1b1f28] bg-cover bg-center',
+                    current
+                      ? 'ring-2 ring-primary'
+                      : 'opacity-80 transition-opacity hover:opacity-100',
+                  )}
+                  style={
+                    tile.posterUrl
+                      ? { backgroundImage: `url(${tile.posterUrl})` }
+                      : undefined
+                  }
+                />
+                <span className="mt-1 block truncate text-xs text-muted-foreground">
+                  {tile.title}
+                </span>
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 
