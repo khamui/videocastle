@@ -56,10 +56,17 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
         position="bottom-center"
         theme="dark"
         toastOptions={{
+          // The `--sd-*` backing tokens, not `--card`/`--border`: `@theme
+          // inline` (index.css) inlines its values into Tailwind's utilities
+          // and emits no `--color-*` custom properties, and nothing defines a
+          // bare `--card` at all. An inline style naming a variable that
+          // doesn't resolve is invalid at computed-value time, which for
+          // `background` means transparent — a toast you can read the page
+          // through. These are the only names that resolve at runtime.
           style: {
-            background: 'var(--card)',
-            color: 'var(--card-foreground)',
-            border: '1px solid var(--border)',
+            background: 'var(--sd-card)',
+            color: 'var(--sd-card-foreground)',
+            border: '1px solid var(--sd-border)',
           },
         }}
       />
