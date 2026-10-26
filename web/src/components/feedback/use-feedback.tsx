@@ -11,6 +11,8 @@ export interface OperatorError {
   title: string;
   /** The full technical message ("label: diagnostic"). */
   message: string;
+  /** HTTP status, when the failure came from a response (vs. a network error). */
+  status?: number;
   /** Stable machine reason code, when the failure carried one. */
   reason?: string;
   /** Raw technical diagnostic, verbatim. */

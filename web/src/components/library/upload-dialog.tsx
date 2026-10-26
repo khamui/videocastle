@@ -48,14 +48,16 @@ export function UploadDialog(props: {
     setBusy(true);
     try {
       await uploadVideo({ title, description, file });
-      setOpen(false);
-      reset();
       props.onUploaded();
       notify('Upload started · transcoding');
     } catch (err) {
       reportError(err, { title: 'Upload failed' });
     } finally {
-      setBusy(false);
+      // Close on both paths — including failure — so the persistent error card
+      // isn't left hidden behind the full-screen dialog on mobile (ADR-0008).
+      // `reset()` also clears `busy`.
+      setOpen(false);
+      reset();
     }
   }
 

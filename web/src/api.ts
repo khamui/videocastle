@@ -24,8 +24,11 @@ export class ApiError extends Error {
     label: string,
     opts: { status: number; reason?: string; detail?: string },
   ) {
-    const diagnostic = opts.detail ?? opts.reason;
-    super(diagnostic ? `${label}: ${diagnostic}` : label);
+    // Prefer the server's own diagnostic; failing that (e.g. a non-JSON nginx
+    // error page), fall back to the bare HTTP status so `.message` still names
+    // the real failure — a 413/502/504 — rather than collapsing to the label.
+    const diagnostic = opts.detail ?? opts.reason ?? `HTTP ${opts.status}`;
+    super(`${label}: ${diagnostic}`);
     this.name = 'ApiError';
     this.status = opts.status;
     this.reason = opts.reason;
