@@ -19,8 +19,23 @@ processes:
       initial_delay_seconds: 1
       period_seconds: 1
       failure_threshold: 30
+    # Bring the API back if it dies, rather than leaving `web` up and proxying
+    # to nothing until someone notices. Give up after a handful of tries, so a
+    # genuinely broken state (a port already in use, say) fails loudly instead
+    # of looping forever.
+    #
+    # This covers the watcher itself going down. It does NOT cover the server
+    # `tsx watch` spawns dying while the watcher lives on: process-compose then
+    # still sees a healthy process, the readiness probe reports Not Ready, and
+    # nothing acts on it — `process-compose process restart api` is the fix.
+    # A `liveness_probe` detects exactly that case and was tried here, but
+    # process-compose cannot terminate `tsx watch` cleanly, so the restart it
+    # triggers wedges the process in `Terminating` indefinitely — worse than
+    # the problem. Revisit if the dev server stops being run under a watcher.
     availability:
-      restart: "no"
+      restart: "on_failure"
+      backoff_seconds: 2
+      max_restarts: 5
 
   web:
     command: npm run dev:web
