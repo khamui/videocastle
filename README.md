@@ -1,271 +1,109 @@
 # videocastle
 
-A self-hostable app for private, straightforward video sharing: an Operator
-uploads a Video, it is transcoded to streamable HLS, and a Share Link is handed
-out to Viewers. The media stays on the Operator's own server; access is gated
-only by an unguessable link (optionally narrowed by a password and/or expiry).
+**Send someone a video from your own server. One link, no account, no upload to anybody else's cloud.**
 
-> **Status:** v1 feature-complete. An Operator can upload Videos (streamed to
-> disk, transcoded to HLS in the background), organize them into Folders, and
-> share either a single Video (`/v/<slug>`) or a whole Folder as a tiled gallery
-> (`/f/<slug>`) — each optionally narrowed by a password and/or an expiry, with a
-> protected Folder unlocking its Videos in one step. Viewers watch in the browser
-> with no account. Uploads respect a configurable size cap, public endpoints are
-> rate-limited, and a forgotten Operator password can be reset from the CLI. It
-> ships as a single Docker container behind the Operator's own reverse proxy.
+![Uploading a Video in the Dashboard, copying its Share Link, and watching it on the Watch Page](docs/images/demo.gif)
 
-## Stack
+Instead of making it public on YouTube, dropping a file in Drive that the other
+person has to download, or sending a transfer link that expires before they open
+it — you run videocastle on a box you control and hand out a link.
 
-A TypeScript monolith (see `docs/adr/`): a [Fastify](https://fastify.dev) server
-serves both the JSON API and a built [Vite](https://vite.dev)/React SPA.
-Metadata lives in SQLite (Node's built-in `node:sqlite`) through a
-[Drizzle](https://orm.drizzle.team) query layer; media lives on the local
-filesystem under `DATA_DIR`. It ships as a single Docker container behind the
-Operator's own TLS-terminating reverse proxy.
+- **The media never leaves your server.** No third party holds your files, sees
+  who watched, or changes the terms later.
+- **Viewers need no account.** They open a link and the video plays. Nothing to
+  sign up for, nothing to install.
+- **Real streaming, not a download.** Every upload is transcoded to HLS and
+  played in the browser — it starts immediately and seeks properly.
+- **One container, your proxy.** A single image, a single volume, behind the
+  reverse proxy you already run.
 
-## Develop
+Narrow a link further with a password, an expiry, or both. Share a single Video
+(`/v/<slug>`) or a whole Folder as a tiled gallery (`/f/<slug>`).
 
-Requires Node.js 24+ (for the built-in `node:sqlite` module) and `ffmpeg` on
-your PATH (the transcoder shells out to `ffmpeg`/`ffprobe`; without them uploads
-succeed but every transcode lands in Failed). The flake dev shell provides Node
-24, ffmpeg, and `process-compose`:
+## Getting started
+
+You need Docker and a few minutes. There's no published image yet, so you build
+it from the clone:
 
 ```sh
-nix develop          # enter the dev shell (or use direnv — see below)
-npm install
-process-compose up   # runs API (:8080) + SPA (:5173) together; q / Ctrl-C stops both
-```
-
-`process-compose up` supervises both dev servers as one group, so quitting it
-tears everything down — no servers left running on stray ports. (process-compose's
-own UI is at http://localhost:8088; the dev shell moves it there so it doesn't
-clash with the app's :8080.) To run them individually instead:
-
-```sh
-npm run dev:server   # API on http://localhost:8080
-npm run dev:web      # SPA on http://localhost:5173 (proxies /api to :8080)
-```
-
-If you use [direnv](https://direnv.net) with `nix-direnv`, the committed
-`.envrc` (`use flake`) auto-loads the dev shell whenever you `cd` in — run
-`direnv allow` once. That keeps ffmpeg on PATH in every terminal, so the server
-never starts without it.
-
-Then open http://localhost:5173 and complete first-run setup.
-
-```sh
-npm test             # run the test suite (in-process API tests)
-npm run typecheck    # type-check without emitting
-npm run build        # build the SPA into web/dist
-npm run db:generate  # regenerate migration SQL after editing src/db/schema.ts
-```
-
-## Deploy
-
-videocastle ships as a single container. With Docker Compose:
-
-```sh
+git clone https://github.com/khamui/videocastle.git
+cd videocastle
 docker compose up --build -d
 ```
 
-It listens on **plain HTTP** at `http://localhost:8080` (map the port to your
-host as you like). All state — media, the SQLite database, and the
-auto-generated session secret — lives under `DATA_DIR` (`/data` in the image)
-and persists in the `videocastle-data` volume across restarts and image
-upgrades. Configure everything via environment variables (see the table below
-and `.env.example`).
+Open <http://localhost:8080>, complete first-run setup — you pick the single
+Operator username and password — and upload something. No configuration is
+needed to try it; every setting has a working default.
 
-### Behind your reverse proxy (TLS)
+For a real deployment you'll want it behind your own TLS-terminating proxy: see
+[docs/operating.md](docs/operating.md).
 
-videocastle **does not terminate TLS**. Run it behind your own TLS-terminating
-reverse proxy (nginx, Caddy, Traefik, …) and forward to the container over HTTP.
-Your proxy should:
+## What it isn't
 
-- terminate HTTPS and proxy to `http://<host>:8080`;
-- set `X-Forwarded-For` (and `X-Forwarded-Proto`) — videocastle trusts these, so
-  per-IP rate limiting sees the real client IP rather than the proxy's;
-- allow large request bodies (raise the proxy's own upload cap to at least your
-  `MAX_UPLOAD_BYTES`, e.g. nginx `client_max_body_size`).
+Stated up front, because these are deliberate and won't change soon:
 
-Set `COOKIE_SECURE=true` so the Operator's session cookie is marked `Secure`.
-A sketch with Caddy:
+- **Not DRM.** Segmented HLS, no download control, and a disabled right-click
+  menu make casual saving harder. That's deterrence. Anyone who can play a Video
+  can capture it, and the segments are served to the browser — so don't treat a
+  Share Link as protection ([ADR-0003](docs/adr/0003-deterrence-over-drm.md)).
+- **Not multi-user.** One Operator per instance. No teams, no roles, no
+  per-Viewer accounts or permissions.
+- **Not a TLS terminator.** It speaks plain HTTP and expects your reverse proxy
+  to handle certificates.
+- **No email, ever.** No SMTP to configure, and so no password-reset mail — a
+  forgotten Operator password is reset with a CLI command on the server.
 
-```
-videos.example.com {
-    reverse_proxy 127.0.0.1:8080
-}
-```
+## Project status
 
-### Reset a forgotten Operator password
+**v0.1 — the v1 feature set is complete and tested; not yet released.** Expect
+to build from source and read the code.
 
-There is no email/SMTP recovery. Reset the single Operator credential directly
-against the running container:
+- **182 tests passing across 17 suites** — in-process API and integration tests
+  covering upload, transcode lifecycle, Folders, sharing, passwords, expiry,
+  rate limiting, storage accounting, and the CLI commands.
+- 10 further tests drive real `ffmpeg`, and run only where it's installed.
+- **No browser/DOM coverage yet** — UI regressions aren't locked down
+  ([#64](https://github.com/khamui/videocastle/issues/64)).
+- **No CI yet.** Tests run locally with `npm test`.
 
-```sh
-docker compose exec videocastle npm run start -- reset-password <username> '<new password>'
-```
+## Planned, not promised
 
-To keep the new password out of the process list, omit it and pass
-`VIDEOCASTLE_NEW_PASSWORD` in the environment instead. The old password stops
-working immediately; no restart is needed.
+- Published container image on GHCR, so trying it stops requiring a build
+  ([#68](https://github.com/khamui/videocastle/issues/68))
+- A documentation website ([#69](https://github.com/khamui/videocastle/issues/69))
+- Retention / auto-expiry of Videos ([#58](https://github.com/khamui/videocastle/issues/58))
+- Egress / bandwidth accounting and a cap ([#57](https://github.com/khamui/videocastle/issues/57))
+- UI test coverage ([#64](https://github.com/khamui/videocastle/issues/64))
 
-### Check that the reported storage figures are still true
+## Documentation
 
-videocastle records what each Video occupies as it writes it, so showing usage
-never costs a walk of the media directory. That means the figures can drift — a
-crash between writing media and recording it, a restore from a backup taken at a
-different moment, a file removed by hand. `storage-reconcile` compares what is
-recorded against what is on disk:
+- [Operating an instance](docs/operating.md) — deploy, reverse proxy, password
+  reset, storage reconciliation
+- [Configuration](docs/configuration.md) — every environment variable, quotas,
+  and sharing the host with other services
+- [Glossary](GLOSSARY.md) — the words this project uses and means precisely
+- [Decision records](docs/adr/) — why it's built the way it is
 
-```sh
-docker compose exec videocastle npm run start -- storage-reconcile
-```
+## Develop
 
-It reports only and writes nothing. Add `--apply` to write the measured sizes
-back. It exits non-zero whenever it finds anything, so it works as a cron health
-check with no output parsing:
+A TypeScript monolith: a [Fastify](https://fastify.dev) server serves both the
+JSON API and a built [Vite](https://vite.dev)/React SPA. Metadata lives in SQLite
+(Node's built-in `node:sqlite`) through a [Drizzle](https://orm.drizzle.team)
+query layer; media lives on the local filesystem
+([ADR-0004](docs/adr/0004-stack-and-deploy-shape.md)).
 
-```
-0  everything agrees
-1  drift, orphaned media, or a Video whose media is gone
-2  bad usage
-```
-
-**It never deletes media, with or without `--apply`** (ADR-0011). Media
-directories with no Video behind them are reported with their size and the
-command to remove them, and left alone — a tool that deletes directories on the
-strength of its own reading of the database would turn a database restore into
-permanent data loss. Removing them is your call.
-
-This is also the one-off step for an instance that has Videos predating storage
-accounting: their recorded sizes are zero, so run `storage-reconcile --apply`
-once after upgrading and the figures are correct from then on. There is
-deliberately no automatic version of this — re-measuring the whole media
-directory is something you ask for, not something a boot does to you.
-
-### A note on download deterrence
-
-videocastle makes casual saving harder — segmented HLS (never a single grabbable
-file), no download control, a disabled right-click menu over the player — but
-this is **deterrence, not protection**. Anyone who can play a Video can capture
-it (screen recording at minimum), and the HLS segments are served to the
-browser. Do not treat a Share Link, a password, or an expiry as DRM; share
-accordingly (see ADR-0003).
-
-## Configuration
-
-| Variable                  | Default           | Purpose                                                              |
-| ------------------------- | ----------------- | -------------------------------------------------------------------- |
-| `HOST`                    | `0.0.0.0`         | Listen address.                                                      |
-| `PORT`                    | `8080`            | Listen port.                                                         |
-| `DATA_DIR`                | `./data`          | Root for SQLite and media; mount a volume here in production.        |
-| `MEDIA_DIR`               | `$DATA_DIR/media` | Where Sources, Renditions, and Posters are written.                  |
-| `MAX_UPLOAD_BYTES`        | `2147483648`      | Largest accepted upload; accepts `2GiB` / `500MB` or bare bytes.     |
-| `FFMPEG_PATH`             | `ffmpeg`          | ffmpeg binary used for transcoding.                                  |
-| `FFPROBE_PATH`            | `ffprobe`         | ffprobe binary used for probing Sources.                             |
-| `STORAGE_QUOTA_BYTES`     | _(unlimited)_     | Ceiling on total media bytes. Refuses writes; never deletes.          |
-| `MIN_FREE_DISK_BYTES`     | `1GiB`            | Free space that must remain on the media filesystem.                 |
-| `QUOTA_WARN_PERCENT`      | `80`              | Where the Dashboard's storage warning band starts.                   |
-| `TRANSCODE_CONCURRENCY`   | `2`               | Videos transcoded in parallel. Lower it to share the host.           |
-| `FFMPEG_THREADS`          | _(ffmpeg's own)_  | `-threads` per ffmpeg invocation; caps CPU per transcode.            |
-| `KEEP_SOURCE_AFTER_TRANSCODE` | `true`        | Keep each Video's original. Off halves what new Videos cost.         |
-| `SESSION_SECRET`          | _(auto)_          | Session-signing secret; generated and persisted on first run.        |
-| `COOKIE_SECURE`           | `false`           | Set `true` when a reverse proxy terminates TLS.                      |
-| `RATE_LIMIT_WINDOW_MS`    | `60000`           | Per-IP rate-limit window, in milliseconds.                           |
-| `RATE_LIMIT_MAX`          | `600`             | Max public viewer requests per IP per window (general flood guard).  |
-| `RATE_LIMIT_PASSWORD_MAX` | `10`              | Max password attempts per IP per window (Video + Folder unlock).     |
-
-Transcoding shells out to `ffmpeg` (bundled in the Docker image). For local
-`npm run dev:server`, install `ffmpeg` on your PATH.
-
-### Capping how much disk videocastle uses
-
-If the box also runs other services, cap what this instance may consume:
-
-```
-STORAGE_QUOTA_BYTES=200GiB
-MIN_FREE_DISK_BYTES=5GiB
-```
-
-`STORAGE_QUOTA_BYTES` is a ceiling on the total bytes of media (Sources,
-Renditions, Posters) and is **unlimited by default** — a fresh install should
-work with no env file. `MIN_FREE_DISK_BYTES` is independent of it and is **on by
-default at 1 GiB**, because a filesystem with no room left can wedge or corrupt
-SQLite; that is a correctness risk rather than a capacity preference.
-
-At either ceiling, videocastle **refuses new writes** — uploads and transcode
-retries — with **507 Insufficient Storage** and a stable reason code
-(`quota_exceeded` or `disk_floor_reached`) carrying the real figures. It is
-checked both from `Content-Length` and again on the bytes actually arriving, so
-a client that omits or understates its length is still stopped, and a refused
-upload leaves no partial Source behind.
-
-**Nothing is ever deleted to make room** (ADR-0011). There is no eviction, no
-pruning, no "oldest first". **Playback is never gated either**: a full disk costs
-you the ability to add Videos, never a Viewer the ability to watch one you
-already shared a link to.
-
-The Dashboard shows all of this: a live meter in the sidebar, a **Storage**
-section breaking usage down with your Videos listed largest-first, and a
-read-only **Settings → Server** view stating every configured value and whether
-it came from the environment or a built-in default. From `QUOTA_WARN_PERCENT`
-(80% by default) upward the meter turns amber and a standing banner appears;
-past the ceiling both turn red. 80% is a guess about someone else's disk — on a
-20 GB quota it fires with 4 GB left, on a 2 TB quota with 400 GB left — so it is
-configurable.
-
-Two consequences worth knowing. Lowering the Quota below what is already stored
-is a legal state — nothing is removed, writes refuse, and the reported usage is
-the truth rather than a figure clamped to the ceiling; you free space by deleting
-Videos you choose. And a Retry that starts with room may finish slightly over,
-because the size of a Rendition is not knowable before it is encoded.
-
-### Giving up the originals to halve what a Video costs
-
-Each Video keeps the file you uploaded — its **Source** — alongside the
-streamable Rendition, which roughly doubles its cost on disk. If you have the
-originals elsewhere and don't need videocastle to hold them, turn that off:
-
-```
-KEEP_SOURCE_AFTER_TRANSCODE=false
-```
-
-Only the exact string `false` turns it off; anything else keeps the Source, so a
-typo errs towards holding on to your originals rather than destroying them.
-
-**This is forward-only.** It governs Videos transcoded from now on and never
-touches a Source already on disk — a setting that reads as "stop keeping these
-from now on" must not mean "destroy the ones I kept" (ADR-0010). To reclaim the
-Sources you already hold, ask for it explicitly:
+Node 24+ and `ffmpeg` on your PATH; the flake dev shell provides both.
 
 ```sh
-docker compose exec videocastle npm run start -- reclaim-sources
+nix develop
+npm install
+process-compose up   # API (:8080) + SPA (:5173) together
 ```
 
-Dry-run by default; add `--apply` to discard. It only ever touches **Ready**
-Videos — a Failed Video's Source is its only route back from a failed
-transcode, so it is skipped and reported. A reclaimed Video keeps playing from
-the Rendition it already has, but **can never be re-transcoded**, and the
-Dashboard shows its Retry as unavailable with the reason rather than offering
-it and then failing.
-
-### Sharing the host with other services
-
-Transcoding is the part of videocastle that a VPS's other tenants notice. Two
-knobs bound it, and you generally want both — `TRANSCODE_CONCURRENCY` alone caps
-how many transcodes run, not what one transcode costs, and ffmpeg will happily
-use every core it can see:
-
-```
-TRANSCODE_CONCURRENCY=1
-FFMPEG_THREADS=2
-```
-
-Queued uploads still complete; they just wait their turn, which is usually the
-right trade on a box that is also serving something else. CPU priority itself is
-better left to the platform (`docker --cpus`, systemd's `CPUQuota`, `nice`) than
-configured here.
+Full developer setup, test commands, and how to regenerate the demo GIF above:
+[docs/operating.md#develop](docs/operating.md#develop).
 
 ## License
 
-AGPL-3.0-only (see ADR-0005).
+AGPL-3.0-only ([ADR-0005](docs/adr/0005-agpl-license.md)) — see
+[LICENSE](LICENSE).
