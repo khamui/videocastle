@@ -17,6 +17,7 @@ services:
       # QUOTA_WARN_PERCENT: '80'         # where the storage warning band starts
       # TRANSCODE_CONCURRENCY: '1'       # parallel transcodes; lower to share the host
       # FFMPEG_THREADS: '2'              # -threads per transcode; caps CPU per job
+      # KEEP_SOURCE_AFTER_TRANSCODE: 'false'  # drop originals after transcoding (forward-only)
     volumes:
       # Media, SQLite, and the session secret persist here across restarts.
       - videocastle-data:/data

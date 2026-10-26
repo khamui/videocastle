@@ -188,6 +188,14 @@ export function StorageSection(props: {
                 <span className="min-w-0 flex-1 truncate text-sm">
                   {video.title}
                 </span>
+                {video.storage.sourceDiscardedAt !== null && (
+                  <span
+                    className="shrink-0 rounded-full border border-border px-2 py-0.5 text-[10px] text-muted-foreground"
+                    title="Its Source was discarded to reclaim disk. It still plays, but can’t be re-transcoded."
+                  >
+                    source discarded
+                  </span>
+                )}
                 {video.state !== 'ready' && <StatusPill state={video.state} />}
                 <span
                   className="shrink-0 font-mono text-xs"

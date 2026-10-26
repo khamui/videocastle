@@ -534,6 +534,25 @@ export async function registerVideoRoutes(
         });
       }
 
+      // A transcode reads the Source. Without one there is nothing to re-encode,
+      // so say that plainly now rather than enqueueing a job that will come
+      // back as an opaque ffmpeg failure minutes later (ADR-0007). The `stat`
+      // is affordable here precisely because Retry is rare and deliberate.
+      if (!(await store.hasSource(video.id))) {
+        return reply.code(409).send({
+          error: 'source_unavailable',
+          detail:
+            video.sourceDiscardedAt !== null
+              ? `The Source for "${video.slug}" was discarded on ` +
+                `${new Date(video.sourceDiscardedAt).toISOString()}, so it cannot be ` +
+                `re-transcoded. Discarding is irreversible (ADR-0010); re-upload the ` +
+                `original to replace this Video.`
+              : `The Source for "${video.slug}" is missing from disk, so it cannot be ` +
+                `re-transcoded. It was not discarded through videocastle — run ` +
+                `\`videocastle storage-reconcile\` to see what else is missing.`,
+        });
+      }
+
       // A retry writes a fresh Rendition, which is the same new bytes an upload
       // would be, so it is gated too. How big that Rendition will be is not
       // knowable in advance, so the rule is "is there any room at all?" rather
@@ -725,6 +744,11 @@ export interface VideoView {
     renditionBytes: number;
     posterBytes: number;
     totalBytes: number;
+    /**
+     * When the Operator discarded this Video's Source (epoch ms), else null.
+     * The Video still plays; it can no longer be re-transcoded (ADR-0010).
+     */
+    sourceDiscardedAt: number | null;
   };
 }
 
@@ -753,6 +777,7 @@ function serializeVideo(
       renditionBytes: video.renditionBytes,
       posterBytes: video.posterBytes,
       totalBytes: totalBytes(video),
+      sourceDiscardedAt: video.sourceDiscardedAt,
     },
   };
 }

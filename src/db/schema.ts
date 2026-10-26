@@ -112,6 +112,16 @@ export const videos = sqliteTable('videos', {
    */
   sourceBytes: integer('source_bytes').notNull().default(0),
   /**
+   * When the Operator deliberately discarded this Video's Source (epoch ms),
+   * or null while it is still held (ADR-0010).
+   *
+   * Recorded rather than inferred from `sourceBytes` being zero, because the
+   * two cases need different things said to the Operator: a discarded Source
+   * is expected and the Video is fine, while one that vanished on its own is a
+   * problem worth investigating. Both make Retry impossible; only one is news.
+   */
+  sourceDiscardedAt: integer('source_discarded_at'),
+  /**
    * Bytes the HLS Rendition (playlist + segments) occupies; recorded when the
    * transcode succeeds, and zeroed when a retry clears the old Rendition.
    */

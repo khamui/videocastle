@@ -105,6 +105,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       transcoder: deps.transcoder,
       onError: (videoId, err) =>
         app.log.error({ err, videoId }, 'transcode failed'),
+      keepSource: deps.config.keepSourceAfterTranscode,
+      now: () => deps.clock.now(),
     },
     deps.config.transcodeConcurrency,
   );

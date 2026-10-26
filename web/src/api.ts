@@ -122,7 +122,7 @@ export interface VideoSummary {
   shareUrl: string;
   createdAt: number;
   /** What this Video occupies on disk, as recorded at write time. */
-  storage: StorageBytes;
+  storage: VideoStorage;
 }
 
 /**
@@ -135,6 +135,15 @@ export interface StorageBytes {
   renditionBytes: number;
   posterBytes: number;
   totalBytes: number;
+}
+
+/** A single Video's footprint, plus whether its Source has been given up. */
+export interface VideoStorage extends StorageBytes {
+  /**
+   * When the Operator discarded this Video's Source (epoch ms), else null. The
+   * Video still plays; it can no longer be re-transcoded (ADR-0010).
+   */
+  sourceDiscardedAt: number | null;
 }
 
 /** A Folder as the Library sees it. Mirrors the server's FolderView. */

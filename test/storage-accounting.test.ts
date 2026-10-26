@@ -164,6 +164,8 @@ describe('recording what a Video holds', () => {
       renditionBytes: 1000,
       posterBytes: 50,
       totalBytes: 5146,
+      // The Source is kept by default, so nothing has been discarded.
+      sourceDiscardedAt: null,
     });
   });
 

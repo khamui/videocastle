@@ -1,0 +1,1 @@
+ALTER TABLE `videos` ADD `source_discarded_at` integer;

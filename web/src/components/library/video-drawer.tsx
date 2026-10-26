@@ -164,21 +164,37 @@ export function VideoDrawer(props: {
         </Field>
 
         <div className="mt-auto flex flex-col gap-3 border-t border-border pt-4">
-          {video.state === 'failed' && (
-            <Button
-              variant="outline"
-              onClick={() =>
-                void run(
-                  () => retryVideo(video.slug),
-                  'Retrying transcode',
-                  'Retry failed',
-                )
-              }
-              disabled={busy}
-            >
-              Retry transcode
-            </Button>
-          )}
+          {video.state === 'failed' &&
+            // A transcode reads the Source. Once it has been discarded there
+            // is nothing to re-encode, so Retry is shown as unavailable with
+            // the reason rather than offered and then refused (ADR-0010).
+            (video.storage.sourceDiscardedAt !== null ? (
+              <div className="rounded-md border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
+                <p className="font-medium text-foreground">
+                  This Video can’t be retried.
+                </p>
+                <p className="mt-1">
+                  Its Source was discarded on{' '}
+                  {new Date(video.storage.sourceDiscardedAt).toLocaleDateString()}{' '}
+                  to reclaim disk, and discarding is irreversible. Re-upload the
+                  original to replace this Video.
+                </p>
+              </div>
+            ) : (
+              <Button
+                variant="outline"
+                onClick={() =>
+                  void run(
+                    () => retryVideo(video.slug),
+                    'Retrying transcode',
+                    'Retry failed',
+                  )
+                }
+                disabled={busy}
+              >
+                Retry transcode
+              </Button>
+            ))}
 
           {confirmingDelete ? (
             <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3">
