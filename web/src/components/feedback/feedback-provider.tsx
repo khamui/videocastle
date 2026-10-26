@@ -15,7 +15,14 @@ let seq = 0;
 function toOperatorError(error: unknown, title: string): OperatorError {
   const id = `err-${(seq += 1)}`;
   if (error instanceof ApiError) {
-    return { id, title, message: error.message, reason: error.reason, detail: error.detail };
+    return {
+      id,
+      title,
+      message: error.message,
+      status: error.status,
+      reason: error.reason,
+      detail: error.detail,
+    };
   }
   if (error instanceof Error) {
     return { id, title, message: error.message };
@@ -100,9 +107,14 @@ function ErrorCard({
 }) {
   const [copied, setCopied] = useState(false);
 
+  // The status is only added separately when a body is present; with no body it
+  // is already baked into `message` ("… : HTTP 413"), so this avoids repeating it.
+  const showStatus = error.status !== undefined && (error.reason || error.detail);
+
   const copyText = [
     error.title,
     error.message,
+    showStatus ? `status: ${error.status}` : null,
     error.reason ? `reason: ${error.reason}` : null,
     error.detail ? `detail: ${error.detail}` : null,
   ]
@@ -133,6 +145,11 @@ function ErrorCard({
       </div>
       <div className="flex flex-col gap-2 px-3 py-2">
         <p className="text-sm leading-snug break-words">{error.message}</p>
+        {showStatus ? (
+          <code className="w-fit rounded border border-border bg-background px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
+            status: {error.status}
+          </code>
+        ) : null}
         {error.reason ? (
           <code className="w-fit rounded border border-border bg-background px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
             reason: {error.reason}
