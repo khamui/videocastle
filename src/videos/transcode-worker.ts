@@ -22,6 +22,14 @@ export interface TranscodeWorkerDeps {
   transcoder: Transcoder;
   /** Where transcode failures are reported; defaults to the console. */
   onError?: (videoId: number, err: unknown) => void;
+  /**
+   * Whether to keep the Source once the Rendition exists (ADR-0010). Defaults
+   * to true — the Source is kept — so a caller that doesn't care gets today's
+   * behaviour and never destroys an original by omission.
+   */
+  keepSource?: boolean;
+  /** Reads the instant a discard is recorded at. Defaults to the system clock. */
+  now?: () => number;
 }
 
 /**
@@ -101,6 +109,16 @@ export function createTranscodeWorker(
           renditionBytes: bytes.renditionBytes,
           posterBytes: bytes.posterBytes,
         });
+
+        // Only once the Video is Ready, never before: if the discard were to
+        // run first and `markReady` then failed, the Video would be left with
+        // no Source and no recorded Rendition — unplayable and unrecoverable.
+        // This way the worst case is a Source that outlives the setting, which
+        // `storage-reconcile` reports and `reclaim-sources` clears up.
+        if (deps.keepSource === false) {
+          await deps.store.removeSource(videoId);
+          await deps.repo.discardSource(videoId, (deps.now ?? Date.now)());
+        }
       } else {
         await deps.repo.markFailed(videoId, outcome.failure);
       }

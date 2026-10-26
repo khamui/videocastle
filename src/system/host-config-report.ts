@@ -171,6 +171,13 @@ export function hostConfigReport(
           env.TRANSCODE_CONCURRENCY,
         ),
         setting(
+          'KEEP_SOURCE_AFTER_TRANSCODE',
+          'Keeps each Video’s original after transcoding. Turning it off halves what new Videos cost, and they can never be re-transcoded.',
+          String(config.keepSourceAfterTranscode),
+          env.KEEP_SOURCE_AFTER_TRANSCODE === undefined ? 'default' : 'environment',
+          env.KEEP_SOURCE_AFTER_TRANSCODE,
+        ),
+        setting(
           'FFMPEG_THREADS',
           'Threads each ffmpeg invocation may use.',
           config.ffmpegThreads === undefined

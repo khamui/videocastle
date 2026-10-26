@@ -7,6 +7,7 @@ import { createSlugGenerator } from './ports/slug';
 import { createFfmpegTranscoder } from './transcode/ffmpeg-transcoder';
 import { runResetPasswordCommand, type CliIo } from './cli/reset-password';
 import { runStorageReconcileCommand } from './cli/storage-reconcile';
+import { runReclaimSourcesCommand } from './cli/reclaim-sources';
 
 /** Production entrypoint: wire the real collaborators and start listening. */
 async function main(): Promise<void> {
@@ -69,6 +70,7 @@ const commands: Record<
 > = {
   'reset-password': runResetPasswordCommand,
   'storage-reconcile': runStorageReconcileCommand,
+  'reclaim-sources': runReclaimSourcesCommand,
 };
 
 const command = subcommand === undefined ? undefined : commands[subcommand];

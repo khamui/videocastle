@@ -84,6 +84,21 @@ export interface Config {
    * machine.
    */
   ffmpegThreads: number | undefined;
+  /**
+   * Whether a Video's Source is kept after it transcodes (env
+   * `KEEP_SOURCE_AFTER_TRANSCODE`, default true — unchanged behaviour).
+   * Turning it off roughly halves what a Video costs on disk, at the price of
+   * never being able to re-transcode it.
+   *
+   * Only the exact string `false` turns it off. Any other value keeps the
+   * Source, so a typo errs towards holding on to the Operator's originals
+   * rather than destroying them (ADR-0010).
+   *
+   * **Forward-only**: this governs Videos transcoded from now on and never
+   * touches a Source already on disk. Those go only when the Operator runs
+   * `reclaim-sources` and asks for it.
+   */
+  keepSourceAfterTranscode: boolean;
   /** Length of the per-IP rate-limit window, in milliseconds. */
   rateLimitWindowMs: number;
   /** Max public viewer requests per IP per window (general flood guard). */
@@ -111,6 +126,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ffprobePath: env.FFPROBE_PATH || 'ffprobe',
     transcodeConcurrency: parsePositiveIntOr(env.TRANSCODE_CONCURRENCY, 2),
     ffmpegThreads: parsePositiveIntOrUndefined(env.FFMPEG_THREADS),
+    keepSourceAfterTranscode: env.KEEP_SOURCE_AFTER_TRANSCODE !== 'false',
     // Generous general ceiling: HLS playback makes many segment requests, so the
     // default (600/min/IP) stops floods without breaking normal viewing, while
     // password attempts get a much tighter bucket to slow brute-forcing.

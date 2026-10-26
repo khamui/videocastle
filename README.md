@@ -168,6 +168,7 @@ accordingly (see ADR-0003).
 | `QUOTA_WARN_PERCENT`      | `80`              | Where the Dashboard's storage warning band starts.                   |
 | `TRANSCODE_CONCURRENCY`   | `2`               | Videos transcoded in parallel. Lower it to share the host.           |
 | `FFMPEG_THREADS`          | _(ffmpeg's own)_  | `-threads` per ffmpeg invocation; caps CPU per transcode.            |
+| `KEEP_SOURCE_AFTER_TRANSCODE` | `true`        | Keep each Video's original. Off halves what new Videos cost.         |
 | `SESSION_SECRET`          | _(auto)_          | Session-signing secret; generated and persisted on first run.        |
 | `COOKIE_SECURE`           | `false`           | Set `true` when a reverse proxy terminates TLS.                      |
 | `RATE_LIMIT_WINDOW_MS`    | `60000`           | Per-IP rate-limit window, in milliseconds.                           |
@@ -218,6 +219,35 @@ is a legal state — nothing is removed, writes refuse, and the reported usage i
 the truth rather than a figure clamped to the ceiling; you free space by deleting
 Videos you choose. And a Retry that starts with room may finish slightly over,
 because the size of a Rendition is not knowable before it is encoded.
+
+### Giving up the originals to halve what a Video costs
+
+Each Video keeps the file you uploaded — its **Source** — alongside the
+streamable Rendition, which roughly doubles its cost on disk. If you have the
+originals elsewhere and don't need videocastle to hold them, turn that off:
+
+```
+KEEP_SOURCE_AFTER_TRANSCODE=false
+```
+
+Only the exact string `false` turns it off; anything else keeps the Source, so a
+typo errs towards holding on to your originals rather than destroying them.
+
+**This is forward-only.** It governs Videos transcoded from now on and never
+touches a Source already on disk — a setting that reads as "stop keeping these
+from now on" must not mean "destroy the ones I kept" (ADR-0010). To reclaim the
+Sources you already hold, ask for it explicitly:
+
+```sh
+docker compose exec videocastle npm run start -- reclaim-sources
+```
+
+Dry-run by default; add `--apply` to discard. It only ever touches **Ready**
+Videos — a Failed Video's Source is its only route back from a failed
+transcode, so it is skipped and reported. A reclaimed Video keeps playing from
+the Rendition it already has, but **can never be re-transcoded**, and the
+Dashboard shows its Retry as unavailable with the reason rather than offering
+it and then failing.
 
 ### Sharing the host with other services
 

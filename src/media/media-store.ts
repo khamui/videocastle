@@ -93,6 +93,21 @@ export class MediaStore {
   }
 
   /**
+   * Removes a Video's Source while leaving its Rendition and Poster in place,
+   * so the Video keeps playing and only the ability to re-transcode is given
+   * up (ADR-0010). Irreversible — the caller has established the Operator
+   * asked for it.
+   */
+  async removeSource(id: number): Promise<void> {
+    await rm(this.sourcePath(id), { force: true });
+  }
+
+  /** Whether a Video's Source is still on disk. */
+  async hasSource(id: number): Promise<boolean> {
+    return (await fileBytes(this.sourcePath(id))) > 0;
+  }
+
+  /**
    * Purges everything a Video holds on disk — its Source, Rendition, and Poster
    * — by removing the Video's directory whole. Used when a Video is deleted (so
    * private footage is really gone) and to roll back a failed upload. `force`

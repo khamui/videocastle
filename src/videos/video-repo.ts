@@ -184,6 +184,18 @@ export class VideoRepo {
     await this.db.delete(videos).where(eq(videos.id, id));
   }
 
+  /**
+   * Records that the Source has been discarded (ADR-0010): its bytes are gone
+   * from the instance's total, and the instant is kept so the Dashboard can
+   * tell a deliberate discard from a Source that went missing on its own.
+   */
+  async discardSource(id: number, at: number): Promise<void> {
+    await this.db
+      .update(videos)
+      .set({ sourceBytes: 0, sourceDiscardedAt: at })
+      .where(eq(videos.id, id));
+  }
+
   /** Records what the Source weighed, once the upload stream has closed. */
   async setSourceBytes(id: number, sourceBytes: number): Promise<void> {
     await this.db.update(videos).set({ sourceBytes }).where(eq(videos.id, id));
