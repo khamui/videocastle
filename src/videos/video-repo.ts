@@ -21,6 +21,8 @@ export class VideoRepo {
     title: string;
     description: string | null;
     createdAt: number;
+    /** The owning Folder, or null/omitted for the Library root. */
+    folderId?: number | null;
   }): Promise<Video> {
     await this.db.insert(videos).values({
       slug: input.slug,
@@ -28,6 +30,7 @@ export class VideoRepo {
       description: input.description,
       state: 'processing',
       progress: 0,
+      folderId: input.folderId ?? null,
       createdAt: input.createdAt,
     });
     const created = await this.findBySlug(input.slug);

@@ -60,6 +60,8 @@ interface UploadTile {
   id: string;
   title: string;
   description: string | null;
+  /** Destination Folder name, or null for the Library root — shown as a tag. */
+  folderName: string | null;
   progress: number;
   phase: 'uploading' | 'finishing';
   abort: () => void;
@@ -223,8 +225,13 @@ function Dashboard(props: {
     title: string;
     description: string;
     file: File;
+    folderSlug: string | null;
   }): void {
     const id = `up-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const folderName =
+      input.folderSlug === null
+        ? null
+        : (folders.find((f) => f.slug === input.folderSlug)?.name ?? null);
     const handle = uploadVideo({
       ...input,
       onProgress: (fraction) =>
@@ -246,6 +253,7 @@ function Dashboard(props: {
         id,
         title: input.title,
         description: input.description.trim() || null,
+        folderName,
         progress: 0,
         phase: 'uploading',
         abort: handle.abort,
@@ -288,6 +296,7 @@ function Dashboard(props: {
               (status != null && !status.transcoding.available) ||
               storage?.pressure === 'full'
             }
+            folders={folders}
             onStart={startUpload}
           />
         </div>
@@ -499,6 +508,11 @@ function UploadCard(props: { upload: UploadTile; onCancel: () => void }) {
               </strong>
               <StatusPill state="uploading" />
             </div>
+            {upload.folderName && (
+              <p className="text-xs text-muted-foreground">
+                → {upload.folderName}
+              </p>
+            )}
             {upload.description && (
               <p className="text-xs text-muted-foreground">
                 {upload.description}
