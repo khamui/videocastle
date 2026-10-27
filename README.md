@@ -11,9 +11,9 @@
 
 ![Uploading a Video in the Dashboard, copying its Share Link, and watching it on the Watch Page](docs/images/demo.gif)
 
-Instead of making it public on YouTube, dropping a file in Drive that the other
-person has to download, or sending a transfer link that expires before they open
-it — you run videocastle on a box you control and hand out a link.
+Some videos don't belong on a platform you don't control — a newborn's first
+weeks, family footage, anything private meant for just a few people. With
+videocastle you run the server yourself and just hand out a link.
 
 - **The media never leaves your server.** No third party holds your files, sees
   who watched, or changes the terms later.
