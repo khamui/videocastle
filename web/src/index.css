@@ -15,7 +15,7 @@
 /*
  * Studio Dark design tokens (from the prototype/look-and-feel branch). Backing
  * vars are `--sd-*`-prefixed so they never collide with legacy styles.css vars
- * (e.g. legacy `--accent` is the brand purple; shadcn's `--accent` is a subtle
+ * (e.g. legacy `--accent` is the brand teal; shadcn's `--accent` is a subtle
  * hover surface). `@theme inline` exposes each as a Tailwind color utility
  * (bg-background, text-muted-foreground, bg-ok, …). videocastle is dark-only.
  */
@@ -59,8 +59,8 @@
   --sd-card-foreground: #e7e9ee;
   --sd-popover: #1a1c23;
   --sd-popover-foreground: #e7e9ee;
-  --sd-primary: #6d6aff;
-  --sd-primary-foreground: #ffffff;
+  --sd-primary: #3dd6b0;
+  --sd-primary-foreground: #0f1e36;
   --sd-secondary: #1a1c23;
   --sd-secondary-foreground: #e7e9ee;
   --sd-muted: #1a1c23;
@@ -71,7 +71,7 @@
   --sd-destructive-foreground: #ffffff;
   --sd-border: #2b2e38;
   --sd-input: #2b2e38;
-  --sd-ring: #6d6aff;
+  --sd-ring: #3dd6b0;
 
   --sd-ok: #36d3a6;
   --sd-warn: #f0b454;
@@ -86,8 +86,8 @@
   --sd-card-foreground: #e7e9ee;
   --sd-popover: #1a1c23;
   --sd-popover-foreground: #e7e9ee;
-  --sd-primary: #6d6aff;
-  --sd-primary-foreground: #ffffff;
+  --sd-primary: #3dd6b0;
+  --sd-primary-foreground: #0f1e36;
   --sd-secondary: #1a1c23;
   --sd-secondary-foreground: #e7e9ee;
   --sd-muted: #1a1c23;
@@ -98,7 +98,7 @@
   --sd-destructive-foreground: #ffffff;
   --sd-border: #2b2e38;
   --sd-input: #2b2e38;
-  --sd-ring: #6d6aff;
+  --sd-ring: #3dd6b0;
 
   --sd-ok: #36d3a6;
   --sd-warn: #f0b454;
