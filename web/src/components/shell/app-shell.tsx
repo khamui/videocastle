@@ -28,10 +28,13 @@ const NAV: { id: Section; label: string; icon: typeof Library }[] = [
 function Brand() {
   return (
     <div className="flex items-center gap-2.5">
-      <span
-        aria-hidden
-        className="size-7 rounded-lg bg-gradient-to-br from-primary to-ok"
-      />
+      <svg aria-hidden viewBox="74 72 40 44" className="size-7">
+        <path
+          fill="#3dd6b0"
+          d="M 76 74.398438 L 82.398438 74.398438 L 82.398438 78.398438 L 88 78.398438 L 88 74.398438 L 99.199219 74.398438 L 99.199219 78.398438 L 104.800781 78.398438 L 104.800781 74.398438 L 111.199219 74.398438 L 111.199219 93.601562 C 111.199219 104.800781 103.199219 111.199219 93.601562 114.398438 C 84 111.199219 76 104.800781 76 93.601562 Z"
+        />
+        <path fill="#0f1e36" d="M 89.601562 86.398438 L 89.601562 101.601562 L 101.601562 94 Z" />
+      </svg>
       <span className="text-sm font-semibold tracking-tight">videocastle</span>
     </div>
   );

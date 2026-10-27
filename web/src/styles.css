@@ -5,7 +5,7 @@
   --border: #2b2e38;
   --text: #e7e9ee;
   --muted: #9aa0ad;
-  --accent: #6d6aff;
+  --accent: #3dd6b0;
   --error: #ff6b6b;
   --ok: #36d3a6;
   --warn: #f0b454;
@@ -87,8 +87,8 @@ input:focus {
 }
 
 button {
-  background: var(--accent);
-  color: white;
+  background: #262a35;
+  color: var(--text);
   border: none;
   border-radius: 8px;
   padding: 11px 14px;

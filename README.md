@@ -1,6 +1,13 @@
-# videocastle
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo.svg">
+    <img alt="videocastle" src="docs/images/logo-light.svg" width="340">
+  </picture>
+</p>
 
-**Send someone a video from your own server. One link, no account, no upload to anybody else's cloud.**
+<p align="center">
+  <strong>Send someone a video from your own server. One link, no account, no upload to anybody else's cloud.</strong>
+</p>
 
 ![Uploading a Video in the Dashboard, copying its Share Link, and watching it on the Watch Page](docs/images/demo.gif)
 
