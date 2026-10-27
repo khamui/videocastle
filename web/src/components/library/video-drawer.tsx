@@ -8,10 +8,12 @@ import {
   retryVideo,
   setVideoExpiry,
   setVideoPassword,
+  setVideoPortrait,
   type FolderSummary,
   type VideoSummary,
 } from '../../api';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import {
   Select,
   SelectContent,
@@ -68,6 +70,14 @@ export function VideoDrawer(props: {
       () => moveVideoToFolder(video.slug, value === 'root' ? null : value),
       'Moved',
       'Could not move video',
+    );
+  }
+
+  async function onPortrait(optimized: boolean): Promise<void> {
+    await run(
+      () => setVideoPortrait(video.slug, optimized),
+      optimized ? 'Portrait optimization on' : 'Portrait optimization off',
+      'Could not update portrait setting',
     );
   }
 
@@ -161,6 +171,21 @@ export function VideoDrawer(props: {
               ))}
             </SelectContent>
           </Select>
+        </Field>
+
+        <Field label="Optimize for portrait (mobile)">
+          <label className="flex items-center justify-between gap-3">
+            <span className="text-xs text-muted-foreground">
+              {video.portraitOptimized
+                ? 'On a portrait phone, crops to fill with the centred portrait content. No effect on desktop.'
+                : 'Shown whole-frame on every screen.'}
+            </span>
+            <Switch
+              checked={video.portraitOptimized}
+              onCheckedChange={(v) => void onPortrait(v)}
+              disabled={busy}
+            />
+          </label>
         </Field>
 
         <div className="mt-auto flex flex-col gap-3 border-t border-border pt-4">

@@ -53,6 +53,15 @@ export const folders = sqliteTable('folders', {
    * link returns the generic Viewer 404 (ADR-0002). Mirrors a Video's expiry.
    */
   expiresAt: integer('expires_at'),
+  /**
+   * The Folder's Portrait-optimized default (GLOSSARY): applied to Videos
+   * uploaded into it, and the state the Folder drawer's toggle reflects —
+   * toggling it also applies to every Video currently in the Folder. Defaults
+   * off. The truth for playback is always the Video's own flag.
+   */
+  portraitOptimized: integer('portrait_optimized', { mode: 'boolean' })
+    .notNull()
+    .default(false),
   /** Epoch milliseconds, read from the injected Clock. */
   createdAt: integer('created_at').notNull(),
 });
@@ -105,6 +114,15 @@ export const videos = sqliteTable('videos', {
    * belongs to at most one Folder (a single column — never two at once).
    */
   folderId: integer('folder_id').references(() => folders.id),
+  /**
+   * Operator display hint (not content): when set, a Viewer on a portrait
+   * screen sees the frame cropped to fill vertically (GLOSSARY: Portrait-
+   * optimized), for a Video whose meaningful content is the vertical centre.
+   * A no-op on landscape/desktop. Defaults off.
+   */
+  portraitOptimized: integer('portrait_optimized', { mode: 'boolean' })
+    .notNull()
+    .default(false),
   /**
    * Bytes the Source occupies on disk, recorded when the upload stream closes.
    * Zero when there is no Source — it was never written, or it was discarded

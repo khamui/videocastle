@@ -68,6 +68,14 @@ export class FolderRepo {
     await this.db.update(folders).set({ expiresAt }).where(eq(folders.id, id));
   }
 
+  /** Sets the Folder's Portrait-optimized default (GLOSSARY). */
+  async setPortraitOptimized(id: number, optimized: boolean): Promise<void> {
+    await this.db
+      .update(folders)
+      .set({ portraitOptimized: optimized })
+      .where(eq(folders.id, id));
+  }
+
   /**
    * Removes a Folder row. The caller must first clear every Video's reference to
    * it — by deleting those Videos or moving them to the Library root — since a
