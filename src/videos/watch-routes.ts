@@ -332,6 +332,8 @@ interface ReadyWatchView {
   description: string | null;
   posterUrl: string;
   playlistUrl: string;
+  /** Operator hint: crop-to-fill on a portrait screen (GLOSSARY: Portrait-optimized). */
+  portraitOptimized: boolean;
 }
 
 interface ProcessingWatchView {
@@ -349,6 +351,7 @@ function serializeReady(video: Video): ReadyWatchView {
     description: video.description,
     posterUrl: `/api/watch/${video.slug}/poster.jpg`,
     playlistUrl: `/api/watch/${video.slug}/stream/index.m3u8`,
+    portraitOptimized: video.portraitOptimized,
   };
 }
 

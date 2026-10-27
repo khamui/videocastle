@@ -23,6 +23,8 @@ export class VideoRepo {
     createdAt: number;
     /** The owning Folder, or null/omitted for the Library root. */
     folderId?: number | null;
+    /** Portrait-optimized hint (inherited from the target Folder on upload). */
+    portraitOptimized?: boolean;
   }): Promise<Video> {
     await this.db.insert(videos).values({
       slug: input.slug,
@@ -31,6 +33,7 @@ export class VideoRepo {
       state: 'processing',
       progress: 0,
       folderId: input.folderId ?? null,
+      portraitOptimized: input.portraitOptimized ?? false,
       createdAt: input.createdAt,
     });
     const created = await this.findBySlug(input.slug);
@@ -171,6 +174,25 @@ export class VideoRepo {
    */
   async setFolder(id: number, folderId: number | null): Promise<void> {
     await this.db.update(videos).set({ folderId }).where(eq(videos.id, id));
+  }
+
+  /** Sets a Video's Portrait-optimized display hint (GLOSSARY). */
+  async setPortraitOptimized(id: number, optimized: boolean): Promise<void> {
+    await this.db
+      .update(videos)
+      .set({ portraitOptimized: optimized })
+      .where(eq(videos.id, id));
+  }
+
+  /** Applies a Portrait-optimized value to every Video in a Folder (the Folder drawer's bulk toggle). */
+  async setPortraitOptimizedByFolder(
+    folderId: number,
+    optimized: boolean,
+  ): Promise<void> {
+    await this.db
+      .update(videos)
+      .set({ portraitOptimized: optimized })
+      .where(eq(videos.folderId, folderId));
   }
 
   /** The Videos in a Folder (by id), or the Library root Videos (`null`), newest first. */

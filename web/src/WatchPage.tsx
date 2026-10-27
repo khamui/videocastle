@@ -212,22 +212,18 @@ function PasswordPrompt(props: {
 }
 
 /**
- * Frame-relative zoom steps (Q4). `1` is Fit (the whole frame); the rest crop
- * into the centre, which is how a Viewer gets close on a portrait segment that
- * sits pillarboxed inside a landscape frame. Resets to Fit per Video — each one
- * is a fresh page load (the rail navigates), so the initial state does that for
- * free.
- */
-const ZOOM_LEVELS = [1, 1.5, 2.5, 2.75, 3] as const;
-const zoomLabel = (z: number): string => (z === 1 ? 'Fit' : `${Math.round(z * 100)}%`);
-
-/**
  * The one shared player, used by every surface (standalone `/v/<slug>` and an
  * in-Folder `/f/<slug>/<vslug>`) so playback never diverges. It sizes its box to
  * the video's real aspect ratio — read from the Poster's intrinsic dimensions,
  * which match the Rendition — so a portrait Video fills the screen instead of
  * being pillarboxed in a fixed 16:9 box, capped at 80vh. An in-Folder view also
  * gets a sibling rail for one-tap switching.
+ *
+ * Portrait-optimized Videos (GLOSSARY, an Operator choice) get special handling
+ * on a portrait screen only: the box becomes a tall cover-fill so the centred
+ * portrait content fills the phone, cropping the baked-in side-bars. A
+ * "Whole frame" overlay toggle drops back to the uncropped view (for the
+ * occasional landscape segment). A no-op on landscape/desktop.
  */
 function Player(props: {
   view: Extract<WatchView, { state: 'ready' }>;
@@ -236,13 +232,23 @@ function Player(props: {
 }) {
   const { view } = props;
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [zoom, setZoom] = useState<number>(1);
   // The video's width/height ratio, and 80% of the viewport height in px, so the
   // box fits any aspect without pillar/letterboxing the box itself.
   const [aspect, setAspect] = useState<number | null>(null);
   const [maxBoxHeight, setMaxBoxHeight] = useState(() =>
     typeof window === 'undefined' ? 720 : window.innerHeight * 0.8,
   );
+  // Portrait-optimize applies only on a portrait screen; the toggle lets the
+  // Viewer drop back to the whole frame. Both reset per Video (fresh page load).
+  const [portraitViewport, setPortraitViewport] = useState(() =>
+    typeof window === 'undefined'
+      ? false
+      : window.matchMedia('(orientation: portrait)').matches,
+  );
+  const [wholeFrame, setWholeFrame] = useState(false);
+
+  const optimizeApplies = view.portraitOptimized && portraitViewport;
+  const cropped = optimizeApplies && !wholeFrame;
 
   useEffect(() => {
     const video = videoRef.current;
@@ -285,23 +291,36 @@ function Player(props: {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  // Fit the box to whichever limit binds first: 960px wide, or 80vh tall.
+  useEffect(() => {
+    const mq = window.matchMedia('(orientation: portrait)');
+    const onChange = () => setPortraitViewport(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  // Not cropped: fit the box to whichever limit binds first — 960px wide or 80vh
+  // tall. Cropped: a tall box that fills the portrait screen, covered by the video.
   const boxWidth = aspect ? Math.min(960, aspect * maxBoxHeight) : undefined;
+  const boxStyle: React.CSSProperties = cropped
+    ? { width: '100%', height: `${Math.round(maxBoxHeight)}px` }
+    : {
+        width: boxWidth ? `${boxWidth}px` : '100%',
+        aspectRatio: String(aspect ?? 16 / 9),
+      };
 
   return (
     <WatchShell wide backHref={props.backHref}>
       <div className="relative mx-auto w-full max-w-[960px]">
         <div
           className="relative mx-auto max-w-full overflow-hidden rounded-xl border border-border bg-black"
-          style={{
-            width: boxWidth ? `${boxWidth}px` : '100%',
-            aspectRatio: String(aspect ?? 16 / 9),
-          }}
+          style={boxStyle}
         >
           <video
             ref={videoRef}
-            className="block h-full w-full bg-black object-contain transition-transform duration-200"
-            style={{ transform: `scale(${zoom})` }}
+            className={cn(
+              'block h-full w-full bg-black',
+              cropped ? 'object-cover' : 'object-contain',
+            )}
             controls
             playsInline
             poster={view.posterUrl}
@@ -313,24 +332,18 @@ function Player(props: {
             disableRemotePlayback
             onContextMenu={(e) => e.preventDefault()}
           />
-          {/* Zoom control (Q4): frame-relative steps, top-left so it clears the
-              download badge; always visible, resets to Fit on each Video. */}
-          <div className="absolute left-3 top-3 flex overflow-hidden rounded-md bg-black/70 text-xs text-white/90 backdrop-blur-sm">
-            {ZOOM_LEVELS.map((z) => (
-              <button
-                key={z}
-                type="button"
-                onClick={() => setZoom(z)}
-                aria-pressed={zoom === z}
-                className={cn(
-                  'px-2 py-1 tabular-nums transition-colors',
-                  zoom === z ? 'bg-white/25 text-white' : 'hover:bg-white/10',
-                )}
-              >
-                {zoomLabel(z)}
-              </button>
-            ))}
-          </div>
+          {/* Portrait-optimize toggle (GLOSSARY): overlaid, not inside the video,
+              so it stays put while the frame is cropped. Only shown when the
+              Operator's hint actually applies (portrait screen). */}
+          {optimizeApplies && (
+            <button
+              type="button"
+              onClick={() => setWholeFrame((w) => !w)}
+              className="absolute left-3 top-3 rounded-md bg-black/70 px-2 py-1 text-xs text-white/90 backdrop-blur-sm transition-colors hover:bg-black/80"
+            >
+              {wholeFrame ? 'Fill portrait' : 'Whole frame'}
+            </button>
+          )}
           {/* Download-deterrence badge (ADR-0003): states plainly that saving is
               discouraged, with no pretense that capture is prevented. */}
           <span className="pointer-events-none absolute right-3 top-3 flex items-center gap-1 rounded-md bg-black/70 px-2 py-1 text-xs text-white/90 backdrop-blur-sm">

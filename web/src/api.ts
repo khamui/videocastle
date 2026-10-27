@@ -124,6 +124,8 @@ export interface VideoSummary {
   expired: boolean;
   /** The owning Folder's slug, or null when the Video sits in the Library root. */
   folderSlug: string | null;
+  /** Operator hint: crop-to-fill on a portrait screen (GLOSSARY: Portrait-optimized). */
+  portraitOptimized: boolean;
   shareUrl: string;
   createdAt: number;
   /** What this Video occupies on disk, as recorded at write time. */
@@ -162,6 +164,8 @@ export interface FolderSummary {
   expiresAt: number | null;
   /** Whether the gallery link has expired as of now (server-evaluated). */
   expired: boolean;
+  /** The Folder's Portrait-optimized default (GLOSSARY), reflected by its drawer toggle. */
+  portraitOptimized: boolean;
   shareUrl: string;
   createdAt: number;
 }
@@ -334,6 +338,22 @@ export async function setFolderExpiry(
   return data.folder;
 }
 
+/** Sets a Folder's Portrait-optimized default, applying it to every Video in the Folder. */
+export async function setFolderPortrait(
+  slug: string,
+  optimized: boolean,
+): Promise<FolderSummary> {
+  const res = await fetch(`/api/folders/${encodeURIComponent(slug)}/portrait`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ optimized }),
+  });
+  if (!res.ok) throw await operatorError(res, 'Could not update Folder portrait setting');
+  const data = (await res.json()) as { folder: FolderSummary };
+  return data.folder;
+}
+
 /** Browses a Folder: the Folder and the Videos it holds. */
 export async function browseFolder(
   slug: string,
@@ -380,6 +400,8 @@ export type WatchView =
       description: string | null;
       posterUrl: string;
       playlistUrl: string;
+      /** Operator hint: crop-to-fill on a portrait screen (GLOSSARY: Portrait-optimized). */
+      portraitOptimized: boolean;
     }
   | {
       state: 'processing';
@@ -534,6 +556,22 @@ export async function setVideoExpiry(
     body: JSON.stringify({ expiresAt }),
   });
   if (!res.ok) throw await operatorError(res, 'Could not update expiry');
+  const data = (await res.json()) as { video: VideoSummary };
+  return data.video;
+}
+
+/** Sets a Video's Portrait-optimized display hint (GLOSSARY). */
+export async function setVideoPortrait(
+  slug: string,
+  optimized: boolean,
+): Promise<VideoSummary> {
+  const res = await fetch(`/api/videos/${encodeURIComponent(slug)}/portrait`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ optimized }),
+  });
+  if (!res.ok) throw await operatorError(res, 'Could not update portrait setting');
   const data = (await res.json()) as { video: VideoSummary };
   return data.video;
 }

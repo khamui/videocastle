@@ -60,6 +60,10 @@ _Avoid_: overview, grid, album
 The single still frame grabbed from a Source and shown on the Watch Page before playback begins.
 _Avoid_: thumbnail, preview, cover
 
+**Portrait-optimized**:
+An Operator display hint on a Video (and a Folder default its Videos inherit) for footage whose meaningful content sits in the vertical centre of the frame — e.g. a portrait clip pillarboxed inside a landscape edit. A Viewer on a portrait screen then sees the frame cropped to fill vertically, with a control to reveal the whole frame; it is ignored on a landscape screen. A display choice only — it never changes the stored Video or its Rendition.
+_Avoid_: vertical mode, crop, zoom
+
 **Host Configuration**:
 The settings that only the person running the server decides, fixed when the instance starts and never editable from the Dashboard. Distinct from the Operator's own choices about their Videos, which are theirs to change at any time.
 _Avoid_: settings, options, env vars, admin config

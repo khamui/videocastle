@@ -222,6 +222,8 @@ export async function registerVideoRoutes(
           title,
           description,
           folderId: folder ? folder.id : null,
+          // Inherit the target Folder's Portrait-optimized default.
+          portraitOptimized: folder ? folder.portraitOptimized : false,
           createdAt: clock.now(),
         });
         await store.ensureVideoDir(created.id);
@@ -518,6 +520,54 @@ export async function registerVideoRoutes(
     },
   );
 
+  // Set a Video's Portrait-optimized display hint (GLOSSARY): a Viewer on a
+  // portrait screen then sees it cropped to fill vertically. A display choice,
+  // not content — a no-op on landscape/desktop.
+  app.post<{ Params: { slug: string }; Body: { optimized?: unknown } }>(
+    '/api/videos/:slug/portrait',
+    requireOperator,
+    async (request, reply) => {
+      const video = await repo.findBySlug(request.params.slug);
+      if (!video) return videoNotFound(reply, request.params.slug);
+
+      if (typeof request.body?.optimized !== 'boolean') {
+        return reply.code(400).send({
+          error: 'invalid_portrait',
+          detail: 'optimized must be a boolean.',
+        });
+      }
+
+      await repo.setPortraitOptimized(video.id, request.body.optimized);
+      const updated = (await repo.findById(video.id)) ?? video;
+      return reply.code(200).send({
+        video: serializeVideo(updated, clock.now(), await folderSlugOf(updated)),
+      });
+    },
+  );
+
+  // Set a Folder's Portrait-optimized default, and apply it to every Video
+  // currently in the Folder (the drawer's bulk toggle). New uploads into the
+  // Folder inherit the default too.
+  app.post<{ Params: { slug: string }; Body: { optimized?: unknown } }>(
+    '/api/folders/:slug/portrait',
+    requireOperator,
+    async (request, reply) => {
+      const folder = await folderRepo.findBySlug(request.params.slug);
+      if (!folder) return folderNotFound(reply, request.params.slug);
+
+      if (typeof request.body?.optimized !== 'boolean') {
+        return reply.code(400).send({
+          error: 'invalid_portrait',
+          detail: 'optimized must be a boolean.',
+        });
+      }
+
+      await folderRepo.setPortraitOptimized(folder.id, request.body.optimized);
+      await repo.setPortraitOptimizedByFolder(folder.id, request.body.optimized);
+      return reply.code(200).send({ folder: await serializeFolderFresh(folder.id) });
+    },
+  );
+
   // Retry a Failed Video. The Source was retained through the failure, so this
   // simply re-queues transcoding (Failed → Processing) against the same file.
   // Only a Failed Video is retryable; retrying anything else is refused with
@@ -746,6 +796,8 @@ export interface VideoView {
   expired: boolean;
   /** The owning Folder's slug, or null when the Video sits in the Library root. */
   folderSlug: string | null;
+  /** Operator display hint: crop-to-fill on a portrait screen (GLOSSARY: Portrait-optimized). */
+  portraitOptimized: boolean;
   shareUrl: string;
   createdAt: number;
   /**
@@ -784,6 +836,7 @@ function serializeVideo(
     expiresAt: video.expiresAt,
     expired: isExpired(video, now),
     folderSlug,
+    portraitOptimized: video.portraitOptimized,
     shareUrl: `/v/${video.slug}`,
     createdAt: video.createdAt,
     storage: {
@@ -807,6 +860,8 @@ export interface FolderView {
   expiresAt: number | null;
   /** Whether the gallery link has expired as of now (per the injected Clock). */
   expired: boolean;
+  /** The Folder's Portrait-optimized default (GLOSSARY), reflected by its drawer toggle. */
+  portraitOptimized: boolean;
   shareUrl: string;
   createdAt: number;
 }
@@ -819,6 +874,7 @@ function serializeFolder(folder: Folder, videoCount: number, now: number): Folde
     protected: folder.passwordHash !== null,
     expiresAt: folder.expiresAt,
     expired: isExpired(folder, now),
+    portraitOptimized: folder.portraitOptimized,
     shareUrl: `/f/${folder.slug}`,
     createdAt: folder.createdAt,
   };

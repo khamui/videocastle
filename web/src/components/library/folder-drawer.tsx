@@ -6,10 +6,12 @@ import {
   deleteFolder,
   setFolderExpiry,
   setFolderPassword,
+  setFolderPortrait,
   type FolderSummary,
   type VideoSummary,
 } from '../../api';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import {
   Dialog,
   DialogContent,
@@ -25,6 +27,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import {
+  Field,
   ShareLinkFields,
   openShareLink,
   useDrawerActions,
@@ -145,6 +148,28 @@ export function FolderDrawer(props: {
           clearPassword={() => clearFolderPassword(folder.slug)}
           setExpiry={(expiresAt) => setFolderExpiry(folder.slug, expiresAt)}
         />
+
+        <Field label="Optimize for portrait (mobile)">
+          <label className="flex items-center justify-between gap-3">
+            <span className="text-xs text-muted-foreground">
+              Applies to every Video in this Folder, and to new uploads into it.
+              On a portrait phone they crop to fill; no effect on desktop.
+            </span>
+            <Switch
+              checked={folder.portraitOptimized}
+              onCheckedChange={(v) =>
+                void actions.run(
+                  () => setFolderPortrait(folder.slug, v),
+                  v
+                    ? 'Portrait optimization on for this Folder'
+                    : 'Portrait optimization off for this Folder',
+                  'Could not update portrait setting',
+                )
+              }
+              disabled={actions.busy}
+            />
+          </label>
+        </Field>
 
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between gap-2">
