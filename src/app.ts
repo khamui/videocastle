@@ -186,7 +186,12 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     cookieSecure: deps.config.cookieSecure,
   });
 
-  await registerWebServer(app, deps.config.webDistDir);
+  await registerWebServer(app, {
+    webDistDir: deps.config.webDistDir,
+    repo: videoRepo,
+    folderRepo,
+    clock: deps.clock,
+  });
 
   return app;
 }
