@@ -64,6 +64,10 @@ _Avoid_: thumbnail, preview, cover
 An Operator display hint on a Video (and a Folder default its Videos inherit) for footage whose meaningful content sits in the vertical centre of the frame — e.g. a portrait clip pillarboxed inside a landscape edit. A Viewer on a portrait screen then sees the frame cropped to fill vertically, with a control to reveal the whole frame; it is ignored on a landscape screen. A display choice only — it never changes the stored Video or its Rendition.
 _Avoid_: vertical mode, crop, zoom
 
+**Autoplay**:
+An Operator playback setting on a Video (and a Folder default its Videos inherit) that lives entirely in the Share Link: when on, the link carries `?autoplay=on`, and the Watch Page starts the Video automatically — _muted_, the only autoplay browsers reliably allow without a Viewer gesture, so the Viewer unmutes from the native controls. Nothing is hidden: the Watch Page autoplays if and only if `?autoplay=on` is present, so a Viewer opts out by removing the param or in by adding it, and a browser that still blocks it simply leaves the Poster up. Off by default — a plain link, where opening it fetches nothing until the Viewer presses play. A playback choice only — it never changes the stored Video or its Rendition.
+_Avoid_: auto-start, play on load (unmuted)
+
 **Host Configuration**:
 The settings that only the person running the server decides, fixed when the instance starts and never editable from the Dashboard. Distinct from the Operator's own choices about their Videos, which are theirs to change at any time.
 _Avoid_: settings, options, env vars, admin config

@@ -126,6 +126,8 @@ export interface VideoSummary {
   folderSlug: string | null;
   /** Operator hint: crop-to-fill on a portrait screen (GLOSSARY: Portrait-optimized). */
   portraitOptimized: boolean;
+  /** Operator hint: start the Video muted on load (GLOSSARY: Autoplay). */
+  autoplay: boolean;
   shareUrl: string;
   createdAt: number;
   /** What this Video occupies on disk, as recorded at write time. */
@@ -166,6 +168,8 @@ export interface FolderSummary {
   expired: boolean;
   /** The Folder's Portrait-optimized default (GLOSSARY), reflected by its drawer toggle. */
   portraitOptimized: boolean;
+  /** The Folder's Autoplay default (GLOSSARY), reflected by its drawer toggle. */
+  autoplay: boolean;
   shareUrl: string;
   createdAt: number;
 }
@@ -350,6 +354,22 @@ export async function setFolderPortrait(
     body: JSON.stringify({ optimized }),
   });
   if (!res.ok) throw await operatorError(res, 'Could not update Folder portrait setting');
+  const data = (await res.json()) as { folder: FolderSummary };
+  return data.folder;
+}
+
+/** Sets a Folder's Autoplay default, applying it to every Video in the Folder. */
+export async function setFolderAutoplay(
+  slug: string,
+  autoplay: boolean,
+): Promise<FolderSummary> {
+  const res = await fetch(`/api/folders/${encodeURIComponent(slug)}/autoplay`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ autoplay }),
+  });
+  if (!res.ok) throw await operatorError(res, 'Could not update Folder autoplay setting');
   const data = (await res.json()) as { folder: FolderSummary };
   return data.folder;
 }
@@ -572,6 +592,22 @@ export async function setVideoPortrait(
     body: JSON.stringify({ optimized }),
   });
   if (!res.ok) throw await operatorError(res, 'Could not update portrait setting');
+  const data = (await res.json()) as { video: VideoSummary };
+  return data.video;
+}
+
+/** Sets a Video's Autoplay playback hint (GLOSSARY). */
+export async function setVideoAutoplay(
+  slug: string,
+  autoplay: boolean,
+): Promise<VideoSummary> {
+  const res = await fetch(`/api/videos/${encodeURIComponent(slug)}/autoplay`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ autoplay }),
+  });
+  if (!res.ok) throw await operatorError(res, 'Could not update autoplay setting');
   const data = (await res.json()) as { video: VideoSummary };
   return data.video;
 }

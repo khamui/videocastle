@@ -248,6 +248,99 @@ describe('portrait optimization', () => {
   });
 });
 
+describe('autoplay', () => {
+  /** Finds one Video in the Operator's Library list by slug. */
+  async function findVideo(
+    app: TestApp['app'],
+    jar: Record<string, string>,
+    slug: string,
+  ): Promise<{ autoplay: boolean } | undefined> {
+    const list = await app.inject({ method: 'GET', url: '/api/videos', cookies: jar });
+    return (list.json().videos as { slug: string; autoplay: boolean }[]).find(
+      (v) => v.slug === slug,
+    );
+  }
+
+  it('toggles a Video’s autoplay flag', async () => {
+    const { app, jar, transcoder } = await signedIn();
+    transcoder.auto = false;
+    const up = await uploadVideo(app, jar, {
+      fields: { title: 'Clip' },
+      file: { fieldname: 'file', filename: 'clip.mp4', content: 'bytes' },
+    });
+    const slug = up.json().video.slug as string;
+    expect(up.json().video.autoplay).toBe(false);
+    // Off: a plain Share Link, no autoplay param.
+    expect(up.json().video.shareUrl).toBe(`/v/${slug}`);
+
+    const on = await app.inject({
+      method: 'POST',
+      url: `/api/videos/${slug}/autoplay`,
+      cookies: jar,
+      payload: { autoplay: true },
+    });
+    expect(on.statusCode).toBe(200);
+    expect(on.json().video.autoplay).toBe(true);
+    // On: the setting lives in the link — it now carries ?autoplay=on.
+    expect(on.json().video.shareUrl).toBe(`/v/${slug}?autoplay=on`);
+    expect((await findVideo(app, jar, slug))?.autoplay).toBe(true);
+  });
+
+  it('applies a Folder toggle to its Videos, and new uploads inherit it', async () => {
+    const { app, jar, transcoder } = await signedIn();
+    transcoder.auto = false;
+    const folder = await app.inject({
+      method: 'POST',
+      url: '/api/folders',
+      cookies: jar,
+      payload: { name: 'Reels' },
+    });
+    const folderSlug = folder.json().folder.slug as string;
+
+    const first = await uploadVideo(app, jar, {
+      fields: { title: 'A', folderSlug },
+      file: { fieldname: 'file', filename: 'a.mp4', content: 'bytes' },
+    });
+    const firstSlug = first.json().video.slug as string;
+
+    const toggled = await app.inject({
+      method: 'POST',
+      url: `/api/folders/${folderSlug}/autoplay`,
+      cookies: jar,
+      payload: { autoplay: true },
+    });
+    expect(toggled.statusCode).toBe(200);
+    expect(toggled.json().folder.autoplay).toBe(true);
+    // Applied to the Video already in the Folder…
+    expect((await findVideo(app, jar, firstSlug))?.autoplay).toBe(true);
+
+    // …and inherited by a Video uploaded into the Folder afterwards.
+    const second = await uploadVideo(app, jar, {
+      fields: { title: 'B', folderSlug },
+      file: { fieldname: 'file', filename: 'b.mp4', content: 'bytes' },
+    });
+    expect(second.json().video.autoplay).toBe(true);
+  });
+
+  it('rejects a non-boolean autoplay value', async () => {
+    const { app, jar, transcoder } = await signedIn();
+    transcoder.auto = false;
+    const up = await uploadVideo(app, jar, {
+      fields: { title: 'V' },
+      file: { fieldname: 'file', filename: 'clip.mp4', content: 'bytes' },
+    });
+    const slug = up.json().video.slug as string;
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/videos/${slug}/autoplay`,
+      cookies: jar,
+      payload: { autoplay: 'yes' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
 describe('transcoding to Ready', () => {
   it('transcodes via the Transcoder port to Ready with one Rendition and a poster', async () => {
     const { app, jar, transcoder, worker, db } = await signedIn();

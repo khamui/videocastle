@@ -224,6 +224,8 @@ export async function registerVideoRoutes(
           folderId: folder ? folder.id : null,
           // Inherit the target Folder's Portrait-optimized default.
           portraitOptimized: folder ? folder.portraitOptimized : false,
+          // Inherit the target Folder's Autoplay default.
+          autoplay: folder ? folder.autoplay : false,
           createdAt: clock.now(),
         });
         await store.ensureVideoDir(created.id);
@@ -568,6 +570,54 @@ export async function registerVideoRoutes(
     },
   );
 
+  // Set a Video's Autoplay playback hint (GLOSSARY): the Watch Page then starts
+  // the Video automatically, muted, on load. A playback choice, not content —
+  // off leaves the click-to-play default untouched.
+  app.post<{ Params: { slug: string }; Body: { autoplay?: unknown } }>(
+    '/api/videos/:slug/autoplay',
+    requireOperator,
+    async (request, reply) => {
+      const video = await repo.findBySlug(request.params.slug);
+      if (!video) return videoNotFound(reply, request.params.slug);
+
+      if (typeof request.body?.autoplay !== 'boolean') {
+        return reply.code(400).send({
+          error: 'invalid_autoplay',
+          detail: 'autoplay must be a boolean.',
+        });
+      }
+
+      await repo.setAutoplay(video.id, request.body.autoplay);
+      const updated = (await repo.findById(video.id)) ?? video;
+      return reply.code(200).send({
+        video: serializeVideo(updated, clock.now(), await folderSlugOf(updated)),
+      });
+    },
+  );
+
+  // Set a Folder's Autoplay default, and apply it to every Video currently in
+  // the Folder (the drawer's bulk toggle). New uploads into the Folder inherit
+  // the default too.
+  app.post<{ Params: { slug: string }; Body: { autoplay?: unknown } }>(
+    '/api/folders/:slug/autoplay',
+    requireOperator,
+    async (request, reply) => {
+      const folder = await folderRepo.findBySlug(request.params.slug);
+      if (!folder) return folderNotFound(reply, request.params.slug);
+
+      if (typeof request.body?.autoplay !== 'boolean') {
+        return reply.code(400).send({
+          error: 'invalid_autoplay',
+          detail: 'autoplay must be a boolean.',
+        });
+      }
+
+      await folderRepo.setAutoplay(folder.id, request.body.autoplay);
+      await repo.setAutoplayByFolder(folder.id, request.body.autoplay);
+      return reply.code(200).send({ folder: await serializeFolderFresh(folder.id) });
+    },
+  );
+
   // Retry a Failed Video. The Source was retained through the failure, so this
   // simply re-queues transcoding (Failed → Processing) against the same file.
   // Only a Failed Video is retryable; retrying anything else is refused with
@@ -798,6 +848,8 @@ export interface VideoView {
   folderSlug: string | null;
   /** Operator display hint: crop-to-fill on a portrait screen (GLOSSARY: Portrait-optimized). */
   portraitOptimized: boolean;
+  /** Operator playback hint: start the Video muted on load (GLOSSARY: Autoplay). */
+  autoplay: boolean;
   shareUrl: string;
   createdAt: number;
   /**
@@ -837,7 +889,12 @@ function serializeVideo(
     expired: isExpired(video, now),
     folderSlug,
     portraitOptimized: video.portraitOptimized,
-    shareUrl: `/v/${video.slug}`,
+    autoplay: video.autoplay,
+    // Autoplay lives entirely in the link: when the Operator turns it on, the
+    // Share Link carries `?autoplay=on` and the Watch Page honours exactly
+    // that — nothing hidden. A Viewer removing the param opts out, adding it
+    // opts in. Off means a plain link.
+    shareUrl: video.autoplay ? `/v/${video.slug}?autoplay=on` : `/v/${video.slug}`,
     createdAt: video.createdAt,
     storage: {
       sourceBytes: video.sourceBytes,
@@ -862,6 +919,8 @@ export interface FolderView {
   expired: boolean;
   /** The Folder's Portrait-optimized default (GLOSSARY), reflected by its drawer toggle. */
   portraitOptimized: boolean;
+  /** The Folder's Autoplay default (GLOSSARY), reflected by its drawer toggle. */
+  autoplay: boolean;
   shareUrl: string;
   createdAt: number;
 }
@@ -875,6 +934,7 @@ function serializeFolder(folder: Folder, videoCount: number, now: number): Folde
     expiresAt: folder.expiresAt,
     expired: isExpired(folder, now),
     portraitOptimized: folder.portraitOptimized,
+    autoplay: folder.autoplay,
     shareUrl: `/f/${folder.slug}`,
     createdAt: folder.createdAt,
   };
