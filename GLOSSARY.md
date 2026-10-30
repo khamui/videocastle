@@ -36,6 +36,10 @@ _Avoid_: root, home, workspace
 The unguessable URL that grants viewing access to a single Video or a whole Folder. The link itself is the only secret; possession of it is permission to view. The Library as a whole is never shareable.
 _Avoid_: public link, URL, share URL
 
+**Link preview**:
+The card a messenger renders when a Share Link is pasted — in VideoCastle, text only: the Video title (and description) or Folder name, served as Open Graph meta in the page `<head>`, with no image (ADR-0012). Only a Ready, unprotected, non-expired link gets a real title; everything else shows the same generic card, so a preview never reveals more than opening the link would (ADR-0002).
+_Avoid_: unfurl, rich preview, OG card
+
 **Processing**:
 The lifecycle state of a Video after upload while its Rendition is being transcoded. A Share Link exists immediately but is not yet playable.
 _Avoid_: pending, encoding, queued
