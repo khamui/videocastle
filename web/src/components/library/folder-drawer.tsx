@@ -7,6 +7,7 @@ import {
   setFolderExpiry,
   setFolderPassword,
   setFolderPortrait,
+  setFolderAutoplay,
   type FolderSummary,
   type VideoSummary,
 } from '../../api';
@@ -164,6 +165,27 @@ export function FolderDrawer(props: {
                     ? 'Portrait optimization on for this Folder'
                     : 'Portrait optimization off for this Folder',
                   'Could not update portrait setting',
+                )
+              }
+              disabled={actions.busy}
+            />
+          </label>
+        </Field>
+
+        <Field label="Autoplay on open">
+          <label className="flex items-center justify-between gap-3">
+            <span className="text-xs text-muted-foreground">
+              Applies to every Video in this Folder, and to new uploads into it.
+              Each starts automatically (muted) when a viewer opens the link;
+              they can unmute in the player.
+            </span>
+            <Switch
+              checked={folder.autoplay}
+              onCheckedChange={(v) =>
+                void actions.run(
+                  () => setFolderAutoplay(folder.slug, v),
+                  v ? 'Autoplay on for this Folder' : 'Autoplay off for this Folder',
+                  'Could not update autoplay setting',
                 )
               }
               disabled={actions.busy}

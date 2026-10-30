@@ -225,12 +225,25 @@ function PasswordPrompt(props: {
  * "Whole frame" overlay toggle drops back to the uncropped view (for the
  * occasional landscape segment). A no-op on landscape/desktop.
  */
+/**
+ * Whether to autoplay (muted) — driven entirely by the `?autoplay=on` query
+ * param, nothing hidden (GLOSSARY: Autoplay). The Operator's per-Video setting
+ * only decides whether their Share Link carries the param; the Watch Page just
+ * honours the URL it was opened with, so a Viewer opts in by adding it or out
+ * by removing it.
+ */
+function autoplayFromUrl(): boolean {
+  if (typeof window === 'undefined') return false;
+  return new URLSearchParams(window.location.search).get('autoplay') === 'on';
+}
+
 function Player(props: {
   view: Extract<WatchView, { state: 'ready' }>;
   backHref?: string;
   folderSlug?: string;
 }) {
   const { view } = props;
+  const autoplay = autoplayFromUrl();
   const videoRef = useRef<HTMLVideoElement>(null);
   // The video's width/height ratio, and 80% of the viewport height in px, so the
   // box fits any aspect without pillar/letterboxing the box itself.
@@ -254,20 +267,37 @@ function Player(props: {
     const video = videoRef.current;
     if (!video) return;
 
+    // Autoplay (GLOSSARY) starts muted — the only autoplay browsers reliably
+    // allow without a user gesture. We set it imperatively (React's `muted`
+    // prop doesn't reliably reach the element) and kick playback once the
+    // source is wired; a browser that still blocks it just leaves the poster
+    // up, which is the no-autoplay behaviour anyway. The Viewer unmutes from
+    // the native controls.
+    const start = () => {
+      if (!autoplay) return;
+      video.muted = true;
+      void video.play().catch(() => {
+        /* Blocked despite muted — fall back to click-to-play. */
+      });
+    };
+
     // Safari (and iOS) play HLS natively; everywhere else, hls.js drives
     // playback through Media Source Extensions.
     if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = view.playlistUrl;
+      start();
       return;
     }
     if (Hls.isSupported()) {
       const hls = new Hls();
       hls.loadSource(view.playlistUrl);
       hls.attachMedia(video);
+      // Wait for the manifest so there is something to play before we ask.
+      hls.on(Hls.Events.MANIFEST_PARSED, start);
       return () => hls.destroy();
     }
     // No HLS support at all — leave the poster up; there is nothing to play.
-  }, [view.playlistUrl]);
+  }, [view.playlistUrl, autoplay]);
 
   // Read the true aspect cheaply off the Poster (shown before playback anyway),
   // so the box is correctly shaped without a server round-trip or schema change.
@@ -324,7 +354,12 @@ function Player(props: {
             controls
             playsInline
             poster={view.posterUrl}
-            preload="none"
+            // Autoplay (muted) needs the first segment eagerly; otherwise keep
+            // the deliberate lazy default so opening a link costs no bandwidth
+            // until the Viewer presses play.
+            autoPlay={autoplay}
+            muted={autoplay}
+            preload={autoplay ? 'auto' : 'none'}
             // Deterrence (ADR-0003): hide the browser's download affordance and
             // the right-click "save video" menu. Not a guarantee — just friction.
             controlsList="nodownload noplaybackrate noremoteplayback"

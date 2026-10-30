@@ -62,6 +62,13 @@ export const folders = sqliteTable('folders', {
   portraitOptimized: integer('portrait_optimized', { mode: 'boolean' })
     .notNull()
     .default(false),
+  /**
+   * The Folder's Autoplay default (GLOSSARY): applied to Videos uploaded into
+   * it, and the state the Folder drawer's toggle reflects — toggling it also
+   * applies to every Video currently in the Folder. Defaults off. The truth for
+   * playback is always the Video's own flag.
+   */
+  autoplay: integer('autoplay', { mode: 'boolean' }).notNull().default(false),
   /** Epoch milliseconds, read from the injected Clock. */
   createdAt: integer('created_at').notNull(),
 });
@@ -123,6 +130,14 @@ export const videos = sqliteTable('videos', {
   portraitOptimized: integer('portrait_optimized', { mode: 'boolean' })
     .notNull()
     .default(false),
+  /**
+   * Operator playback hint (not content): when set, the Watch Page starts the
+   * Video automatically, muted, as soon as the page loads (GLOSSARY: Autoplay).
+   * Muted because that is the only autoplay browsers reliably allow without a
+   * user gesture — the Viewer unmutes from the native controls. Defaults off,
+   * which preserves the click-to-play default (`preload="none"`, no autoplay).
+   */
+  autoplay: integer('autoplay', { mode: 'boolean' }).notNull().default(false),
   /**
    * Bytes the Source occupies on disk, recorded when the upload stream closes.
    * Zero when there is no Source — it was never written, or it was discarded

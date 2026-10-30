@@ -9,6 +9,7 @@ import {
   setVideoExpiry,
   setVideoPassword,
   setVideoPortrait,
+  setVideoAutoplay,
   type FolderSummary,
   type VideoSummary,
 } from '../../api';
@@ -78,6 +79,14 @@ export function VideoDrawer(props: {
       () => setVideoPortrait(video.slug, optimized),
       optimized ? 'Portrait optimization on' : 'Portrait optimization off',
       'Could not update portrait setting',
+    );
+  }
+
+  async function onAutoplay(autoplay: boolean): Promise<void> {
+    await run(
+      () => setVideoAutoplay(video.slug, autoplay),
+      autoplay ? 'Autoplay on' : 'Autoplay off',
+      'Could not update autoplay setting',
     );
   }
 
@@ -183,6 +192,21 @@ export function VideoDrawer(props: {
             <Switch
               checked={video.portraitOptimized}
               onCheckedChange={(v) => void onPortrait(v)}
+              disabled={busy}
+            />
+          </label>
+        </Field>
+
+        <Field label="Autoplay on open">
+          <label className="flex items-center justify-between gap-3">
+            <span className="text-xs text-muted-foreground">
+              {video.autoplay
+                ? 'Starts automatically (muted) when a viewer opens the link; they can unmute in the player.'
+                : 'Viewer presses play to start.'}
+            </span>
+            <Switch
+              checked={video.autoplay}
+              onCheckedChange={(v) => void onAutoplay(v)}
               disabled={busy}
             />
           </label>

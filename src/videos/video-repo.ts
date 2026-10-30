@@ -25,6 +25,8 @@ export class VideoRepo {
     folderId?: number | null;
     /** Portrait-optimized hint (inherited from the target Folder on upload). */
     portraitOptimized?: boolean;
+    /** Autoplay hint (inherited from the target Folder on upload). */
+    autoplay?: boolean;
   }): Promise<Video> {
     await this.db.insert(videos).values({
       slug: input.slug,
@@ -34,6 +36,7 @@ export class VideoRepo {
       progress: 0,
       folderId: input.folderId ?? null,
       portraitOptimized: input.portraitOptimized ?? false,
+      autoplay: input.autoplay ?? false,
       createdAt: input.createdAt,
     });
     const created = await this.findBySlug(input.slug);
@@ -192,6 +195,19 @@ export class VideoRepo {
     await this.db
       .update(videos)
       .set({ portraitOptimized: optimized })
+      .where(eq(videos.folderId, folderId));
+  }
+
+  /** Sets a Video's Autoplay playback hint (GLOSSARY). */
+  async setAutoplay(id: number, autoplay: boolean): Promise<void> {
+    await this.db.update(videos).set({ autoplay }).where(eq(videos.id, id));
+  }
+
+  /** Applies an Autoplay value to every Video in a Folder (the Folder drawer's bulk toggle). */
+  async setAutoplayByFolder(folderId: number, autoplay: boolean): Promise<void> {
+    await this.db
+      .update(videos)
+      .set({ autoplay })
       .where(eq(videos.folderId, folderId));
   }
 
