@@ -877,7 +877,7 @@ export interface VideoView {
   };
 }
 
-function serializeVideo(
+export function serializeVideo(
   video: Video,
   now: number,
   folderSlug: string | null,

@@ -16,6 +16,14 @@ export interface Config {
   /** Root directory for persisted media (Sources, Renditions, Posters). */
   mediaDir: string;
   /**
+   * Directory for in-progress resumable (tus) Uploads, before they become
+   * Videos (ADR-0013). Kept separate from `mediaDir` so a partial Upload is
+   * never mistaken for a Video's media by storage-reconcile, and so reaping an
+   * abandoned partial never touches Operator media (ADR-0011). Default
+   * `$DATA_DIR/uploads`.
+   */
+  uploadsDir: string;
+  /**
    * Maximum accepted upload size in bytes (env `MAX_UPLOAD_BYTES`, default 2 GiB).
    * Accepts a size suffix (`2GiB`, `500MB`) as well as a bare byte count.
    * Enforced both up front via Content-Length and as the multipart file-size
@@ -123,6 +131,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     dataDir,
     dbPath: env.DB_PATH ?? join(dataDir, 'videocastle.db'),
     mediaDir: env.MEDIA_DIR ?? join(dataDir, 'media'),
+    uploadsDir: env.UPLOADS_DIR ?? join(dataDir, 'uploads'),
     maxUploadBytes: parseBytesOr(env.MAX_UPLOAD_BYTES, 2 * 1024 ** 3),
     maxUploadBatch: parsePositiveIntOr(env.MAX_UPLOAD_BATCH, 15),
     storageQuotaBytes: parseBytes(env.STORAGE_QUOTA_BYTES),

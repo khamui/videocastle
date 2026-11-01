@@ -152,10 +152,12 @@ export async function buildTestApp(
   const transcoder = createFakeTranscoder();
   if (overrides.transcoderAvailable === false) transcoder.available = false;
   const mediaDir = mkdtempSync(join(tmpdir(), 'vc-media-'));
+  const uploadsDir = mkdtempSync(join(tmpdir(), 'vc-uploads-'));
   // The same object is handed to `buildApp`, so the Settings → Server view
   // reports provenance against the environment the test actually set rather
-  // than the one the suite happens to run under.
-  const env = { MEDIA_DIR: mediaDir, ...overrides.env };
+  // than the one the suite happens to run under. A temp UPLOADS_DIR keeps
+  // in-progress tus partials out of the repo's ./data during tests.
+  const env = { MEDIA_DIR: mediaDir, UPLOADS_DIR: uploadsDir, ...overrides.env };
   const config = loadConfig(env);
 
   const app = await buildApp({
@@ -180,6 +182,14 @@ export async function buildTestApp(
       // Only close the database if we opened it (not a caller-owned handle).
       if (!overrides.db) db.close();
       rmSync(mediaDir, { recursive: true, force: true });
+      // @tus/file-store also fires a fire-and-forget `mkdir` of its directory
+      // from its constructor (its own TODO admits this), which on the
+      // password-hashing-heavy suites lands late, behind scrypt on the libuv
+      // threadpool. Let a macrotask flush so that stray `mkdir` settles before
+      // the rm, or it races into an uncaught ENOENT.
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      await new Promise((resolve) => setImmediate(resolve));
+      rmSync(uploadsDir, { recursive: true, force: true });
     },
   };
 }

@@ -15,6 +15,7 @@ import { VideoRepo } from './videos/video-repo';
 import { FolderRepo } from './videos/folder-repo';
 import { createTranscodeWorker, type VideoWorker } from './videos/transcode-worker';
 import { registerVideoRoutes } from './videos/routes';
+import { registerUploadRoutes } from './videos/upload-routes';
 import { registerWatchRoutes } from './videos/watch-routes';
 import { createTranscodingStatus } from './system/transcoding-status';
 import { registerRateLimiting } from './system/rate-limit';
@@ -174,6 +175,24 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     dbPath: deps.config.dbPath,
     config: deps.config,
     env: deps.env ?? process.env,
+  });
+
+  // Resumable, multi-file uploads over tus (ADR-0013). Shares the repos,
+  // worker, store, and storage guard with the legacy single-shot route; each
+  // finished Upload becomes a Processing Video the same way.
+  await app.register(registerUploadRoutes, {
+    session,
+    repo: videoRepo,
+    folderRepo,
+    worker,
+    store: mediaStore,
+    slugGenerator: deps.slugGenerator,
+    clock: deps.clock,
+    transcoding,
+    storage: storageGuard,
+    maxUploadBytes: deps.config.maxUploadBytes,
+    maxUploadBatch: deps.config.maxUploadBatch,
+    uploadsDir: deps.config.uploadsDir,
   });
 
   // The public Viewer surface (no session): watch a Video via its Share Link,
