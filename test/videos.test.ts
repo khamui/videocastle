@@ -105,14 +105,15 @@ describe('uploading a Video', () => {
     expect(list.json().videos).toHaveLength(0);
   });
 
-  it('rejects an upload with no title', async () => {
+  it('names an upload with no title "Unnamed video" (title is optional)', async () => {
     const { app, jar } = await signedIn();
 
     const res = await uploadVideo(app, jar, {
       file: { fieldname: 'file', filename: 'clip.mp4', content: 'bytes' },
     });
 
-    expect(res.statusCode).toBe(400);
+    expect(res.statusCode).toBe(201);
+    expect(res.json().video).toMatchObject({ title: 'Unnamed video', state: 'processing' });
   });
 
   it('requires an authenticated Operator to upload or list', async () => {

@@ -24,6 +24,14 @@ export interface Config {
    */
   maxUploadBytes: number;
   /**
+   * Most files an Operator may select in one Upload batch (env
+   * `MAX_UPLOAD_BATCH`, default 15). A client-side guardrail on the dropzone;
+   * server-side the same figure caps how many incomplete (resumable) Uploads
+   * may exist at once, since tus has no notion of a batch (ADR-0013). Distinct
+   * from `maxUploadBytes`, which bounds a single file's size, not the count.
+   */
+  maxUploadBatch: number;
+  /**
    * Ceiling on the total bytes this instance's media may occupy (env
    * `STORAGE_QUOTA_BYTES`, accepts size suffixes). Undefined means unlimited,
    * which is the default: a fresh install must work with no env file, and an
@@ -116,6 +124,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     dbPath: env.DB_PATH ?? join(dataDir, 'videocastle.db'),
     mediaDir: env.MEDIA_DIR ?? join(dataDir, 'media'),
     maxUploadBytes: parseBytesOr(env.MAX_UPLOAD_BYTES, 2 * 1024 ** 3),
+    maxUploadBatch: parsePositiveIntOr(env.MAX_UPLOAD_BATCH, 15),
     storageQuotaBytes: parseBytes(env.STORAGE_QUOTA_BYTES),
     minFreeDiskBytes: parseBytesOr(env.MIN_FREE_DISK_BYTES, 1024 ** 3),
     quotaWarnPercent: parsePercentOr(env.QUOTA_WARN_PERCENT, 80),

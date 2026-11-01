@@ -22,6 +22,13 @@ import type { FolderRepo } from './folder-repo';
 import type { Folder } from '../db/schema';
 import type { VideoWorker } from './transcode-worker';
 
+/**
+ * The name a Video is born with when the Operator uploads it without a title
+ * (GLOSSARY: a title is optional). A real, shown name — not null — so the
+ * Library, Watch Page, and link preview all stay readable.
+ */
+export const UNNAMED_VIDEO = 'Unnamed video';
+
 /** Raised by {@link byteCeiling} when an upload outgrows what may be written. */
 class StorageCeilingExceeded extends Error {
   constructor(
@@ -202,11 +209,11 @@ export async function registerVideoRoutes(
           continue;
         }
 
-        // The single file part. Everything we need to open the Source file must
-        // be known by now; otherwise there is nothing valid to stream into.
-        if (!title) {
-          return reply.code(400).send({ error: 'missing_title' });
-        }
+        // The single file part. A title is optional (GLOSSARY): when the
+        // Operator gives none, the Video is born with the default name rather
+        // than refused — a titleless Video would be unreadable in the Library
+        // and in a link preview, so "optional" means auto-filled, never empty.
+        const effectiveTitle = title && title.length > 0 ? title : UNNAMED_VIDEO;
 
         // An optional target Folder (fields arrive before the file): resolve it
         // now so the Video is created already filed, never in a transient root
@@ -219,7 +226,7 @@ export async function registerVideoRoutes(
 
         created = await repo.create({
           slug: slugGenerator.next(),
-          title,
+          title: effectiveTitle,
           description,
           folderId: folder ? folder.id : null,
           // Inherit the target Folder's Portrait-optimized default.

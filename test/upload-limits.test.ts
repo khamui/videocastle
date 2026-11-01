@@ -85,3 +85,34 @@ describe('upload size limit', () => {
     expect(res.json().video).toMatchObject({ title: 'Fine', state: 'processing' });
   });
 });
+
+describe('optional title (GLOSSARY: a title is optional)', () => {
+  it('names an untitled upload "Unnamed video" rather than refusing it', async () => {
+    const { app, jar } = await signedInWithCap(10_000);
+    // No title field at all — the Video is born with the default name.
+    const { payload, headers } = multipart({
+      fields: {},
+      file: { fieldname: 'file', filename: 'clip.mp4', content: 'x'.repeat(200) },
+    });
+
+    const res = await app.inject({ method: 'POST', url: '/api/videos', cookies: jar, headers, payload });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().video).toMatchObject({ title: 'Unnamed video', state: 'processing' });
+  });
+
+  it('defaults a blank/whitespace title to "Unnamed video"', async () => {
+    const { app, jar } = await signedInWithCap(10_000);
+    const { payload, headers } = multipart({
+      fields: { title: '   ' },
+      file: { fieldname: 'file', filename: 'clip.mp4', content: 'x'.repeat(200) },
+    });
+
+    const res = await app.inject({ method: 'POST', url: '/api/videos', cookies: jar, headers, payload });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().video.title).toBe('Unnamed video');
+  });
+
+  it('defaults MAX_UPLOAD_BATCH to 15 when unset', () => {
+    expect(loadConfig({}).maxUploadBatch).toBe(15);
+  });
+});

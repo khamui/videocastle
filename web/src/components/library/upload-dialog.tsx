@@ -57,7 +57,9 @@ export function UploadDialog(props: {
   }
 
   function submit() {
-    if (!file || title.trim().length === 0) return;
+    // Title is optional (GLOSSARY): an empty one lets the server name the Video
+    // "Unnamed video". Only a file is required to start an upload.
+    if (!file) return;
     props.onStart({
       title: title.trim(),
       description,
@@ -130,11 +132,11 @@ export function UploadDialog(props: {
         />
 
         <label className="flex flex-col gap-1.5 text-sm">
-          Title
+          Title <span className="text-muted-foreground">(optional)</span>
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder="Video title"
+            placeholder="Unnamed video"
             className="rounded-md border border-input bg-background px-3 py-2 text-foreground focus-visible:border-ring focus-visible:outline-none"
           />
         </label>
@@ -168,10 +170,7 @@ export function UploadDialog(props: {
           <DialogClose asChild>
             <Button variant="outline">Cancel</Button>
           </DialogClose>
-          <Button
-            onClick={submit}
-            disabled={props.disabled || !file || title.trim().length === 0}
-          >
+          <Button onClick={submit} disabled={props.disabled || !file}>
             Start upload
           </Button>
         </DialogFooter>

@@ -16,6 +16,7 @@ came from the environment or a built-in default.
 | `DATA_DIR`                    | `./data`          | Root for SQLite and media; mount a volume here in production.        |
 | `MEDIA_DIR`                   | `$DATA_DIR/media` | Where Sources, Renditions, and Posters are written.                  |
 | `MAX_UPLOAD_BYTES`            | `2147483648`      | Largest accepted upload; accepts `2GiB` / `500MB` or bare bytes.     |
+| `MAX_UPLOAD_BATCH`            | `15`              | Most files selectable in one upload; also caps concurrent uploads.   |
 | `FFMPEG_PATH`                 | `ffmpeg`          | ffmpeg binary used for transcoding.                                  |
 | `FFPROBE_PATH`                | `ffprobe`         | ffprobe binary used for probing Sources.                             |
 | `STORAGE_QUOTA_BYTES`         | _(unlimited)_     | Ceiling on total media bytes. Refuses writes; never deletes.         |
