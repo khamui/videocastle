@@ -13,8 +13,16 @@ Anyone who opens a Share Link to watch a Video. Has no account and never logs in
 _Avoid_: user, guest
 
 **Video**:
-A single piece of content an Operator has uploaded and shares as one unit. The logical item that a Share Link points at.
+A single piece of content an Operator has uploaded and shares as one unit. The logical item that a Share Link points at. A title is optional at upload; an untitled Video carries the default name "Unnamed video" (a real name, shown wherever a title is — so a link preview never reveals less than opening it would).
 _Avoid_: clip, media, asset
+
+**Upload**:
+The in-progress transfer of a Source from the Operator's device to the server — resumable (ADR-0013), so a phone that locks mid-transfer continues from the same byte offset when woken, never from zero. An Upload is not yet a Video: no row and no Share Link exist until it completes, at which point it becomes a Video in Processing. An Upload the Operator abandons is reaped after 24h and never becomes a Video.
+_Avoid_: transfer, file, pending video
+
+**Upload batch**:
+The set of files — up to `MAX_UPLOAD_BATCH` (Host Configuration, default 15) — an Operator selects in one action. They upload one at a time; each is an independent Upload, and one failing leaves the rest to continue. A batch is a client-side grouping only: the server sees independent Uploads, not a batch.
+_Avoid_: bulk upload, queue, set
 
 **Source**:
 The original file an Operator uploaded, kept on the server as-is.
