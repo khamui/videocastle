@@ -135,6 +135,12 @@ export async function registerVideoRoutes(
         warnPercent: quotaWarnPercent,
         dbPath,
       }),
+      // Upload ceilings the Dashboard needs to shape the dropzone: the most
+      // files selectable at once, and a single file's byte cap.
+      uploads: {
+        maxBatch: config.maxUploadBatch,
+        maxBytes: maxUploadBytes,
+      },
     };
   });
 

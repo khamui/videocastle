@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { WatchPage } from './WatchPage';
 import { GalleryPage } from './GalleryPage';
 import { FeedbackProvider } from '@/components/feedback/feedback-provider';
@@ -34,7 +34,7 @@ import {
   setup,
   signIn,
   signOut,
-  uploadVideo,
+  uploadVideoResumable,
   UploadAborted,
   type FolderSummary,
   type OperatorSummary,
@@ -50,11 +50,12 @@ type Screen =
   | { kind: 'dashboard'; operator: OperatorSummary };
 
 /**
- * A client-only tile for an upload in flight, shown in the Videos grid before
- * the real (server) card exists. `progress` is a 0..1 fraction; `finishing` is
- * the tail after the browser has sent every byte but the server hasn't yet
- * responded (written the Source + created the row), so the bar shouldn't look
- * stuck at an exact 100%.
+ * A client-only tile for one file in an Upload batch, shown in the Videos grid
+ * before the real (server) card exists (GLOSSARY: Upload). Files upload one at
+ * a time, so a tile sits `queued` until its turn, then `uploading`, then
+ * `finishing` (the tail after every byte is sent but the server hasn't yet
+ * created the Video), and `failed` if it errored — from which it can retry.
+ * `progress` is a 0..1 fraction; `abort` is set only while the file is active.
  */
 interface UploadTile {
   id: string;
@@ -62,9 +63,16 @@ interface UploadTile {
   description: string | null;
   /** Destination Folder name, or null for the Library root — shown as a tag. */
   folderName: string | null;
+  /** Destination Folder slug, carried so a retry re-files the Video the same way. */
+  folderSlug: string | null;
+  /** The file itself, kept so a failed tile can retry without re-picking it. */
+  file: File;
   progress: number;
-  phase: 'uploading' | 'finishing';
-  abort: () => void;
+  phase: 'queued' | 'uploading' | 'finishing' | 'failed';
+  /** The failure message when `phase === 'failed'`, else null. */
+  error: string | null;
+  /** Aborts the in-flight upload; set only while `phase === 'uploading' | 'finishing'`. */
+  abort: (() => void) | null;
 }
 
 /** `/v/<slug>` is the public Viewer Share Link; everything else is the Dashboard. */
@@ -174,6 +182,10 @@ function Dashboard(props: {
   const [error, setError] = useState<string | null>(null);
   // Uploads in flight, shown as optimistic tiles until the real card appears.
   const [uploads, setUploads] = useState<UploadTile[]>([]);
+  // The queue's authoritative copy (so the sequential pump reads the latest
+  // without a stale closure) and a guard so exactly one file is in flight.
+  const tilesRef = useRef<UploadTile[]>([]);
+  const activeRef = useRef(false);
   // Which shell nav section is active. Only `library` is built in v1.
   const [section, setSection] = useState<Section>('library');
 
@@ -217,61 +229,99 @@ function Dashboard(props: {
     return () => window.removeEventListener('beforeunload', warn);
   }, [uploads.length]);
 
-  // Start an upload: add an optimistic tile, stream the file with real byte
-  // progress, then swap the tile for the real (Processing) card on success —
-  // or drop it (and report, unless the Operator cancelled) on failure. Several
-  // may run at once; each tile is keyed by its own id.
-  function startUpload(input: {
-    title: string;
-    description: string;
-    file: File;
-    folderSlug: string | null;
-  }): void {
-    const id = `up-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const folderName =
-      input.folderSlug === null
-        ? null
-        : (folders.find((f) => f.slug === input.folderSlug)?.name ?? null);
-    const handle = uploadVideo({
-      ...input,
+  // Write the queue through `tilesRef` so the pump always reads the latest
+  // tiles synchronously (React state alone would be a tick behind).
+  function commitTiles(next: UploadTile[]): void {
+    tilesRef.current = next;
+    setUploads(next);
+  }
+  function patchTile(id: string, patch: Partial<UploadTile>): void {
+    commitTiles(tilesRef.current.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+  }
+  function dropTile(id: string): void {
+    commitTiles(tilesRef.current.filter((t) => t.id !== id));
+  }
+
+  // Drive the queue one file at a time (ADR-0013: sequential, kinder to a mobile
+  // radio and cleanly resumable). Starts the next `queued` tile when nothing is
+  // in flight; a file finishing, failing, or being cancelled calls back here to
+  // advance — so one file failing never stalls the rest of the batch.
+  function pump(): void {
+    if (activeRef.current) return;
+    const next = tilesRef.current.find((t) => t.phase === 'queued');
+    if (!next) return;
+
+    activeRef.current = true;
+    const handle = uploadVideoResumable({
+      title: next.title,
+      description: next.description ?? '',
+      file: next.file,
+      folderSlug: next.folderSlug,
       onProgress: (fraction) =>
-        setUploads((prev) =>
-          prev.map((u) =>
-            u.id === id
-              ? {
-                  ...u,
-                  progress: fraction,
-                  phase: fraction >= 1 ? 'finishing' : 'uploading',
-                }
-              : u,
-          ),
-        ),
+        patchTile(next.id, {
+          progress: fraction,
+          phase: fraction >= 1 ? 'finishing' : 'uploading',
+        }),
     });
-    setUploads((prev) => [
-      ...prev,
-      {
-        id,
-        title: input.title,
-        description: input.description.trim() || null,
-        folderName,
-        progress: 0,
-        phase: 'uploading',
-        abort: handle.abort,
-      },
-    ]);
+    patchTile(next.id, { phase: 'uploading', progress: 0, error: null, abort: handle.abort });
+
     handle.done.then(
       () => {
-        setUploads((prev) => prev.filter((u) => u.id !== id));
-        // The real card now appears as Processing; the transcode poll takes over.
+        dropTile(next.id); // the real Processing card takes its place on refresh
+        activeRef.current = false;
         void refresh();
         notify('Upload complete · transcoding');
+        pump();
       },
       (err) => {
-        setUploads((prev) => prev.filter((u) => u.id !== id));
-        if (err instanceof UploadAborted) return; // operator cancelled — not an error
-        reportError(err, { title: 'Upload failed' });
+        activeRef.current = false;
+        if (err instanceof UploadAborted) {
+          dropTile(next.id); // operator cancelled — not an error
+        } else {
+          patchTile(next.id, {
+            phase: 'failed',
+            abort: null,
+            error: err instanceof Error ? err.message : 'Upload failed',
+          });
+          reportError(err, { title: 'Upload failed' });
+        }
+        pump(); // carry on with the rest of the batch
       },
     );
+  }
+
+  // Queue a whole Upload batch; the pump uploads them one at a time.
+  function startBatch(
+    items: { title: string; description: string; file: File; folderSlug: string | null }[],
+  ): void {
+    const tiles: UploadTile[] = items.map((item) => ({
+      id: `up-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      title: item.title,
+      description: item.description.trim() || null,
+      folderName:
+        item.folderSlug === null
+          ? null
+          : (folders.find((f) => f.slug === item.folderSlug)?.name ?? null),
+      folderSlug: item.folderSlug,
+      file: item.file,
+      progress: 0,
+      phase: 'queued',
+      error: null,
+      abort: null,
+    }));
+    commitTiles([...tilesRef.current, ...tiles]);
+    pump();
+  }
+
+  // Re-queue a failed file; cancel an active (abort), queued, or failed one.
+  function retryTile(id: string): void {
+    patchTile(id, { phase: 'queued', progress: 0, error: null });
+    pump();
+  }
+  function cancelTile(id: string): void {
+    const tile = tilesRef.current.find((t) => t.id === id);
+    if (tile?.abort) tile.abort(); // active → aborts, its handler drops the tile
+    else dropTile(id); // queued or failed → just remove it
   }
 
   // The Library root lists Folders and the unfiled Videos side by side; a
@@ -297,7 +347,8 @@ function Dashboard(props: {
               storage?.pressure === 'full'
             }
             folders={folders}
-            onStart={startUpload}
+            maxBatch={status?.uploads.maxBatch ?? 15}
+            onStart={startBatch}
           />
         </div>
       </header>
@@ -360,7 +411,8 @@ function Dashboard(props: {
             <UploadCard
               key={upload.id}
               upload={upload}
-              onCancel={upload.abort}
+              onCancel={() => cancelTile(upload.id)}
+              onRetry={() => retryTile(upload.id)}
             />
           ))}
           {unfiled.map((video) => (
@@ -485,55 +537,76 @@ function FolderCard(props: {
 }
 
 /**
- * An upload in flight, shaped like a {@link VideoCard} so it slots into the same
- * grid, but with the brand-tinted "uploading" treatment (distinct from the amber
- * transcoding bar), a live byte-progress bar, and a real Cancel. It isn't
- * clickable — there's no Video to open yet. Once the upload completes it's
- * replaced by the real card; Cancel aborts the request and drops the tile.
+ * One file in an Upload batch, shaped like a {@link VideoCard} so it slots into
+ * the same grid, with the brand-tinted "uploading" treatment (distinct from the
+ * amber transcoding bar). It isn't clickable — there's no Video to open yet. A
+ * tile is `queued` until its turn, shows live byte progress while `uploading`,
+ * and on `failed` offers Retry. Cancel aborts the request (terminating the
+ * server-side partial) and drops the tile; on completion the real Processing
+ * card takes its place.
  */
-function UploadCard(props: { upload: UploadTile; onCancel: () => void }) {
+function UploadCard(props: { upload: UploadTile; onCancel: () => void; onRetry: () => void }) {
   const { upload } = props;
   const finishing = upload.phase === 'finishing';
+  const failed = upload.phase === 'failed';
+  const queued = upload.phase === 'queued';
   const pct = Math.round(upload.progress * 100);
+  // A blank title is shown as the muted "Unnamed video" the server will store.
+  const titled = upload.title.trim().length > 0;
+
+  const label = failed
+    ? 'Upload failed'
+    : queued
+      ? 'Queued'
+      : finishing
+        ? 'Finishing…'
+        : `Uploading… ${pct}%`;
 
   return (
     <li>
       <Card className="overflow-hidden">
         <div className="flex w-full flex-col text-left">
-          <VideoThumb state="uploading" tintIndex={0} duration={null} />
+          <VideoThumb state={failed ? 'failed' : 'uploading'} tintIndex={0} duration={null} />
           <div className="flex flex-col gap-2 p-3.5">
             <div className="flex items-center gap-2">
-              <strong className="min-w-0 flex-1 truncate text-sm">
-                {upload.title}
+              <strong
+                className={cn(
+                  'min-w-0 flex-1 truncate text-sm',
+                  !titled && 'font-normal text-muted-foreground',
+                )}
+              >
+                {titled ? upload.title : 'Unnamed video'}
               </strong>
-              <StatusPill state="uploading" />
+              <StatusPill state={failed ? 'failed' : 'uploading'} />
             </div>
             {upload.folderName && (
-              <p className="text-xs text-muted-foreground">
-                → {upload.folderName}
-              </p>
+              <p className="text-xs text-muted-foreground">→ {upload.folderName}</p>
             )}
-            {upload.description && (
-              <p className="text-xs text-muted-foreground">
-                {upload.description}
-              </p>
+            {failed && upload.error ? (
+              <p className="text-xs text-destructive">{upload.error}</p>
+            ) : (
+              <div className="h-1 overflow-hidden rounded bg-background">
+                <div
+                  className={cn(
+                    'h-full bg-primary transition-all duration-300',
+                    finishing && 'animate-pulse',
+                  )}
+                  style={{ width: queued ? '0%' : `${finishing ? 100 : pct}%` }}
+                />
+              </div>
             )}
-            <div className="h-1 overflow-hidden rounded bg-background">
-              <div
-                className={cn(
-                  'h-full bg-primary transition-all duration-300',
-                  finishing && 'animate-pulse',
-                )}
-                style={{ width: `${finishing ? 100 : pct}%` }}
-              />
-            </div>
             <div className="flex items-center justify-between gap-2">
-              <span className="text-xs tabular-nums text-muted-foreground">
-                {finishing ? 'Finishing…' : `Uploading… ${pct}%`}
-              </span>
-              <Button variant="outline" size="sm" onClick={props.onCancel}>
-                Cancel
-              </Button>
+              <span className="text-xs tabular-nums text-muted-foreground">{label}</span>
+              <div className="flex items-center gap-2">
+                {failed && (
+                  <Button variant="outline" size="sm" onClick={props.onRetry}>
+                    Retry
+                  </Button>
+                )}
+                <Button variant="outline" size="sm" onClick={props.onCancel}>
+                  {failed || queued ? 'Remove' : 'Cancel'}
+                </Button>
+              </div>
             </div>
           </div>
         </div>
