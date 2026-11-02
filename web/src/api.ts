@@ -1,4 +1,5 @@
 /** Thin client for the Operator auth API. All calls share the session cookie. */
+import * as tus from 'tus-js-client';
 
 export interface OperatorSummary {
   username: string;
@@ -210,6 +211,8 @@ export interface StorageReport extends StorageBytes {
 export interface ServerStatus {
   transcoding: TranscodingStatus;
   storage: StorageReport;
+  /** Upload ceilings that shape the dropzone (GLOSSARY: Upload batch). */
+  uploads: { maxBatch: number; maxBytes: number };
 }
 
 /** Transcoding health and storage usage, for the Dashboard's banners and meter. */
@@ -727,4 +730,70 @@ export function uploadVideo(input: {
   });
 
   return { done, abort: () => xhr.abort() };
+}
+
+/**
+ * Uploads a Video resumably over the tus protocol (ADR-0013). Unlike
+ * {@link uploadVideo}'s single XHR, a dropped or suspended connection — a phone
+ * that locks mid-upload — is retried from the server-tracked byte offset rather
+ * than restarted, so the Operator doesn't lose a half-sent file to a pocket.
+ * The Video and its Share Link come into being only when the bytes finish; the
+ * server returns the created Video in the final response, which `done` resolves
+ * with. `onProgress` receives a 0..1 fraction; `abort()` terminates the partial
+ * on the server too, leaving nothing for the reaper.
+ */
+export function uploadVideoResumable(input: {
+  title: string;
+  description: string;
+  file: File;
+  folderSlug?: string | null;
+  onProgress?: (fraction: number) => void;
+}): UploadHandle {
+  // tus metadata is string-valued; omit a key rather than send it empty, so an
+  // untitled upload carries no `title` and the server names it "Unnamed video".
+  const metadata: Record<string, string> = {};
+  if (input.title.trim()) metadata.title = input.title.trim();
+  if (input.description.trim()) metadata.description = input.description.trim();
+  if (input.folderSlug) metadata.folderSlug = input.folderSlug;
+
+  let upload: tus.Upload | undefined;
+  let rejectDone!: (reason: unknown) => void;
+  const done = new Promise<VideoSummary>((resolve, reject) => {
+    rejectDone = reject;
+    upload = new tus.Upload(input.file, {
+      endpoint: '/api/uploads',
+      // Escalating retries ride out a suspended tab, not just a momentary blip;
+      // tus resumes from the offset the server already holds.
+      retryDelays: [0, 1000, 3000, 5000, 10000, 20000],
+      metadata,
+      removeFingerprintOnSuccess: true,
+      onProgress: (sent, total) => {
+        if (total > 0) input.onProgress?.(sent / total);
+      },
+      onError: (err) => reject(err),
+      onSuccess: ({ lastResponse }) => {
+        try {
+          const data = JSON.parse(lastResponse.getBody()) as { video: VideoSummary };
+          resolve(data.video);
+        } catch {
+          reject(
+            new ApiError('Upload finished but its response was unreadable', {
+              status: lastResponse.getStatus(),
+            }),
+          );
+        }
+      },
+    });
+    upload.start();
+  });
+
+  return {
+    done,
+    // `abort(true)` DELETEs the partial on the server (tus termination), and we
+    // settle `done` as a cancel — tus does not call `onError` for a user abort.
+    abort: () => {
+      void upload?.abort(true);
+      rejectDone(new UploadAborted());
+    },
+  };
 }

@@ -16,6 +16,14 @@ export interface Config {
   /** Root directory for persisted media (Sources, Renditions, Posters). */
   mediaDir: string;
   /**
+   * Directory for in-progress resumable (tus) Uploads, before they become
+   * Videos (ADR-0013). Kept separate from `mediaDir` so a partial Upload is
+   * never mistaken for a Video's media by storage-reconcile, and so reaping an
+   * abandoned partial never touches Operator media (ADR-0011). Default
+   * `$DATA_DIR/uploads`.
+   */
+  uploadsDir: string;
+  /**
    * Maximum accepted upload size in bytes (env `MAX_UPLOAD_BYTES`, default 2 GiB).
    * Accepts a size suffix (`2GiB`, `500MB`) as well as a bare byte count.
    * Enforced both up front via Content-Length and as the multipart file-size
@@ -23,6 +31,14 @@ export interface Config {
    * partial Source behind (see src/videos/routes.ts).
    */
   maxUploadBytes: number;
+  /**
+   * Most files an Operator may select in one Upload batch (env
+   * `MAX_UPLOAD_BATCH`, default 15). A client-side guardrail on the dropzone;
+   * server-side the same figure caps how many incomplete (resumable) Uploads
+   * may exist at once, since tus has no notion of a batch (ADR-0013). Distinct
+   * from `maxUploadBytes`, which bounds a single file's size, not the count.
+   */
+  maxUploadBatch: number;
   /**
    * Ceiling on the total bytes this instance's media may occupy (env
    * `STORAGE_QUOTA_BYTES`, accepts size suffixes). Undefined means unlimited,
@@ -115,7 +131,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     dataDir,
     dbPath: env.DB_PATH ?? join(dataDir, 'videocastle.db'),
     mediaDir: env.MEDIA_DIR ?? join(dataDir, 'media'),
+    uploadsDir: env.UPLOADS_DIR ?? join(dataDir, 'uploads'),
     maxUploadBytes: parseBytesOr(env.MAX_UPLOAD_BYTES, 2 * 1024 ** 3),
+    maxUploadBatch: parsePositiveIntOr(env.MAX_UPLOAD_BATCH, 15),
     storageQuotaBytes: parseBytes(env.STORAGE_QUOTA_BYTES),
     minFreeDiskBytes: parseBytesOr(env.MIN_FREE_DISK_BYTES, 1024 ** 3),
     quotaWarnPercent: parsePercentOr(env.QUOTA_WARN_PERCENT, 80),
