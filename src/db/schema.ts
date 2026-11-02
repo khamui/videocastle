@@ -54,6 +54,15 @@ export const folders = sqliteTable('folders', {
    */
   expiresAt: integer('expires_at'),
   /**
+   * Whether the Operator has explicitly disabled the `/f/` gallery Share Link
+   * (GLOSSARY: Disabled, ADR-0014). A reversible kill switch, independent of
+   * expiry: a disabled gallery returns the generic Viewer 404 (ADR-0002) and
+   * re-enabling restores it. Defaults off. Disabling a Folder darkens only its
+   * own gallery link; member Videos' `/v/` links are cascaded only by an
+   * explicit opt-in at disable time, never on re-enable.
+   */
+  disabled: integer('disabled', { mode: 'boolean' }).notNull().default(false),
+  /**
    * The Folder's Portrait-optimized default (GLOSSARY): applied to Videos
    * uploaded into it, and the state the Folder drawer's toggle reflects —
    * toggling it also applies to every Video currently in the Folder. Defaults
@@ -116,6 +125,14 @@ export const videos = sqliteTable('videos', {
    * generic Viewer 404 (ADR-0002). Set it forward again to re-enable the link.
    */
   expiresAt: integer('expires_at'),
+  /**
+   * Whether the Operator has explicitly disabled this Video's `/v/` Share Link
+   * (GLOSSARY: Disabled, ADR-0014). A reversible kill switch, independent of
+   * both expiry and the transcode lifecycle: a disabled link returns the generic
+   * Viewer 404 (ADR-0002) in any state (Processing/Ready/Failed), and re-enabling
+   * restores it unchanged. Defaults off.
+   */
+  disabled: integer('disabled', { mode: 'boolean' }).notNull().default(false),
   /**
    * The owning Folder, or null when the Video sits in the Library root. A Video
    * belongs to at most one Folder (a single column — never two at once).

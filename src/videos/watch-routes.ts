@@ -10,7 +10,7 @@ import type { Folder, Video } from '../db/schema';
 import { verifyPassword } from '../auth/password';
 import type { Clock } from '../ports/clock';
 import type { MediaStore } from '../media/media-store';
-import { isExpired } from './routes';
+import { isDisabled, isExpired } from './routes';
 import type { VideoRepo } from './video-repo';
 import type { FolderRepo } from './folder-repo';
 
@@ -48,24 +48,27 @@ export async function registerWatchRoutes(
   const { repo, folderRepo, store, clock, cookieSecure } = options;
 
   /**
-   * Resolves a slug to a *live* Video for the Viewer: unknown, deleted, and
-   * expired links all collapse to undefined, so they share the one generic 404
-   * (ADR-0002 — a Viewer can never tell which of the three a link is).
+   * Resolves a slug to a *live* Video for the Viewer: unknown, deleted, expired,
+   * and disabled links all collapse to undefined, so they share the one generic
+   * 404 (ADR-0002 — a Viewer can never tell which of them a link is). Disabled
+   * is the Operator's reversible kill switch (ADR-0014), enforced here exactly
+   * like expiry.
    */
   async function liveVideo(slug: string): Promise<Video | undefined> {
     const video = await repo.findBySlug(slug);
-    if (!video || isExpired(video, clock.now())) return undefined;
+    if (!video || isExpired(video, clock.now()) || isDisabled(video)) return undefined;
     return video;
   }
 
   /**
-   * Resolves a slug to a *live* Folder for the Viewer: an unknown or expired
-   * Folder collapses to undefined, so both share the one generic 404 (ADR-0002 —
-   * a Viewer can never tell which it is), exactly as {@link liveVideo} does.
+   * Resolves a slug to a *live* Folder for the Viewer: an unknown, expired, or
+   * disabled Folder collapses to undefined, so all share the one generic 404
+   * (ADR-0002 — a Viewer can never tell which it is), exactly as
+   * {@link liveVideo} does.
    */
   async function liveFolder(slug: string): Promise<Folder | undefined> {
     const folder = await folderRepo.findBySlug(slug);
-    if (!folder || isExpired(folder, clock.now())) return undefined;
+    if (!folder || isExpired(folder, clock.now()) || isDisabled(folder)) return undefined;
     return folder;
   }
 
@@ -206,7 +209,10 @@ export async function registerWatchRoutes(
   async function openGalleryView(folder: Folder) {
     const now = clock.now();
     const tiles = (await repo.listByFolder(folder.id))
-      .filter((video) => video.state === 'ready' && !isExpired(video, now))
+      .filter(
+        (video) =>
+          video.state === 'ready' && !isExpired(video, now) && !isDisabled(video),
+      )
       .map(serializeTile);
     return { protected: false as const, slug: folder.slug, name: folder.name, videos: tiles };
   }

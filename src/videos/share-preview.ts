@@ -1,7 +1,7 @@
 import type { Clock } from '../ports/clock';
 import type { VideoRepo } from './video-repo';
 import type { FolderRepo } from './folder-repo';
-import { isExpired } from './routes';
+import { isDisabled, isExpired } from './routes';
 
 /**
  * Per-link preview metadata injected into the SPA shell's `<head>` so a Share
@@ -85,6 +85,7 @@ export function createPreviewResolver(deps: {
     if (found.state !== 'ready') return null;
     if (found.passwordHash !== null) return null;
     if (isExpired(found, clock.now())) return null;
+    if (isDisabled(found)) return null;
     return { title: found.title, description: found.description };
   }
 
@@ -93,6 +94,7 @@ export function createPreviewResolver(deps: {
     if (!found) return null;
     if (found.passwordHash !== null) return null;
     if (isExpired(found, clock.now())) return null;
+    if (isDisabled(found)) return null;
     return { title: found.name, description: null };
   }
 
@@ -111,11 +113,13 @@ export function createPreviewResolver(deps: {
     if (!parent) return null;
     if (parent.passwordHash !== null) return null;
     if (isExpired(parent, clock.now())) return null;
+    if (isDisabled(parent)) return null;
 
     const found = await repo.findBySlug(videoSlug);
     if (!found || found.folderId !== parent.id) return null;
     if (found.state !== 'ready') return null;
     if (isExpired(found, clock.now())) return null;
+    if (isDisabled(found)) return null;
     return { title: found.title, description: found.description };
   }
 

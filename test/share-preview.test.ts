@@ -146,6 +146,21 @@ describe('Share-Link previews served from /v and /f', () => {
     expect(res.body).not.toContain('Yesterday');
   });
 
+  it('stays generic for a disabled Video', async () => {
+    const t = await signedInWithWeb();
+    const slug = await uploadReady(t, { title: 'Switched off' });
+    await t.app.inject({
+      method: 'POST',
+      url: `/api/videos/${slug}/disabled`,
+      cookies: t.jar,
+      payload: { disabled: true },
+    });
+
+    const res = await html(t, `/v/${slug}`);
+    expect(res.body).not.toContain('og:title');
+    expect(res.body).not.toContain('Switched off');
+  });
+
   it('stays generic for an unknown slug', async () => {
     const t = await signedInWithWeb();
     const res = await html(t, '/v/does-not-exist');
