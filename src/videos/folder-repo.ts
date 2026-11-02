@@ -68,6 +68,17 @@ export class FolderRepo {
     await this.db.update(folders).set({ expiresAt }).where(eq(folders.id, id));
   }
 
+  /**
+   * Sets or clears the Folder's disabled flag (GLOSSARY: Disabled, ADR-0014) —
+   * the reversible kill switch on its `/f/` gallery Share Link. Mirrors
+   * {@link VideoRepo.setDisabled}: the repo persists the boolean; the cascade to
+   * member Videos (an opt-in on disable only) and the Viewer-facing judgement
+   * are the caller's.
+   */
+  async setDisabled(id: number, disabled: boolean): Promise<void> {
+    await this.db.update(folders).set({ disabled }).where(eq(folders.id, id));
+  }
+
   /** Sets the Folder's Portrait-optimized default (GLOSSARY). */
   async setPortraitOptimized(id: number, optimized: boolean): Promise<void> {
     await this.db

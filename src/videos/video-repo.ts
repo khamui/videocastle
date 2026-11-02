@@ -170,6 +170,29 @@ export class VideoRepo {
   }
 
   /**
+   * Sets or clears a Video's disabled flag (GLOSSARY: Disabled, ADR-0014) — the
+   * reversible kill switch on its `/v/` Share Link. The repo just persists the
+   * boolean; the Viewer-facing judgement (disabled → generic 404) is the
+   * caller's, exactly as with expiry.
+   */
+  async setDisabled(id: number, disabled: boolean): Promise<void> {
+    await this.db.update(videos).set({ disabled }).where(eq(videos.id, id));
+  }
+
+  /**
+   * Applies a disabled value to every Video in a Folder — the opt-in cascade of
+   * a Folder disable (ADR-0014). Only ever called to cascade a disable *on*; a
+   * Folder re-enable never cascades, so each Video's link is re-enabled on its
+   * own.
+   */
+  async setDisabledByFolder(folderId: number, disabled: boolean): Promise<void> {
+    await this.db
+      .update(videos)
+      .set({ disabled })
+      .where(eq(videos.folderId, folderId));
+  }
+
+  /**
    * Moves a Video into a Folder (by the Folder's id) or back to the Library
    * root (`null`). A Video belongs to at most one Folder — this single column
    * makes "never in two at once" structural. The caller validates the Folder

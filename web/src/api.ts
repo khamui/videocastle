@@ -123,6 +123,8 @@ export interface VideoSummary {
   expiresAt: number | null;
   /** Whether the link has expired as of now (server-evaluated). */
   expired: boolean;
+  /** Whether the Operator has disabled the link (GLOSSARY: Disabled, ADR-0014). */
+  disabled: boolean;
   /** The owning Folder's slug, or null when the Video sits in the Library root. */
   folderSlug: string | null;
   /** Operator hint: crop-to-fill on a portrait screen (GLOSSARY: Portrait-optimized). */
@@ -167,6 +169,8 @@ export interface FolderSummary {
   expiresAt: number | null;
   /** Whether the gallery link has expired as of now (server-evaluated). */
   expired: boolean;
+  /** Whether the Operator has disabled the gallery link (GLOSSARY: Disabled, ADR-0014). */
+  disabled: boolean;
   /** The Folder's Portrait-optimized default (GLOSSARY), reflected by its drawer toggle. */
   portraitOptimized: boolean;
   /** The Folder's Autoplay default (GLOSSARY), reflected by its drawer toggle. */
@@ -267,6 +271,63 @@ export async function listFolders(): Promise<FolderSummary[]> {
   if (!res.ok) throw new Error('Could not load Folders');
   const data = (await res.json()) as { folders: FolderSummary[] };
   return data.folders;
+}
+
+/**
+ * The Share Links overview: every Video and Folder with its link state, for the
+ * Dashboard's Share Links section. Reuses the same payloads as the Library, so
+ * each row carries `disabled`, `expired`, `protected`, lifecycle state, and the
+ * owning Folder.
+ */
+export async function listLinks(): Promise<{
+  videos: VideoSummary[];
+  folders: FolderSummary[];
+}> {
+  const res = await fetch('/api/links', { credentials: 'same-origin' });
+  if (!res.ok) throw await operatorError(res, 'Could not load Share Links');
+  return (await res.json()) as { videos: VideoSummary[]; folders: FolderSummary[] };
+}
+
+/**
+ * Disables or re-enables a Video's Share Link (GLOSSARY: Disabled, ADR-0014) —
+ * the reversible kill switch. Disabling collapses the link to the generic Viewer
+ * 404; re-enabling restores it. Allowed in any lifecycle state.
+ */
+export async function setVideoDisabled(
+  slug: string,
+  disabled: boolean,
+): Promise<VideoSummary> {
+  const res = await fetch(`/api/videos/${encodeURIComponent(slug)}/disabled`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ disabled }),
+  });
+  if (!res.ok) throw await operatorError(res, 'Could not update the link');
+  const data = (await res.json()) as { video: VideoSummary };
+  return data.video;
+}
+
+/**
+ * Disables or re-enables a Folder's `/f/` gallery Share Link (ADR-0014). When
+ * disabling, `cascade: true` also disables every member Video's own `/v/` link
+ * (the opt-in, disable-time choice). Re-enabling never cascades — it restores
+ * only the gallery link — so `cascade` is ignored when `disabled` is false.
+ */
+export async function setFolderDisabled(
+  slug: string,
+  disabled: boolean,
+  cascade = false,
+): Promise<FolderSummary> {
+  const res = await fetch(`/api/folders/${encodeURIComponent(slug)}/disabled`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ disabled, cascade }),
+  });
+  if (!res.ok) throw await operatorError(res, 'Could not update the gallery link');
+  const data = (await res.json()) as { folder: FolderSummary };
+  return data.folder;
 }
 
 /** Creates a Folder with the given name and returns it (with a `/f/<slug>` link). */

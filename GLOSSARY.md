@@ -41,7 +41,7 @@ The Operator's complete set of Videos and Folders. A Video that is in no Folder 
 _Avoid_: root, home, workspace
 
 **Share Link**:
-The unguessable URL that grants viewing access to a single Video or a whole Folder. The link itself is the only secret; possession of it is permission to view. The Library as a whole is never shareable.
+The unguessable URL that grants viewing access to a single Video or a whole Folder. The link itself is the only secret; possession of it is permission to view. The Library as a whole is never shareable. A link can be independently **Disabled** by the Operator and/or Expired; either collapses it to the generic Viewer 404 (ADR-0002).
 _Avoid_: public link, URL, share URL
 
 **Link preview**:
@@ -55,6 +55,10 @@ _Avoid_: pending, encoding, queued
 **Failed**:
 The lifecycle state of a Video whose transcode errored. The Source is retained so the Operator can retry or delete; Viewers see a neutral "temporarily unavailable" message.
 _Avoid_: errored, broken
+
+**Disabled**:
+A Share Link the Operator has explicitly switched off — a reversible kill switch, separate from expiry (ADR-0014). A disabled link returns the same generic Viewer 404 as an expired or unknown one (ADR-0002); re-enabling restores it unchanged (slug, media, password, and expiry all survive). Independent of the Video lifecycle — a Processing or Failed Video's link can be disabled too — and of Expired: a link can be both, in which case the Operator sees it as Expired. Disabling a Folder darkens its gallery link, and optionally (opt-in, at disable time) the member Videos' own links too; re-enabling a Folder never cascades.
+_Avoid_: deactivated, revoked, suspended, killed, off
 
 **Dashboard**:
 The Operator-only interface for uploading Videos and managing their titles, links, and lifecycle.

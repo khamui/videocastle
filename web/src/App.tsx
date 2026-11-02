@@ -6,11 +6,7 @@ import { useFeedback } from '@/components/feedback/use-feedback';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { formatBytes } from '@/lib/format';
-import {
-  AppShell,
-  SectionPlaceholder,
-  type Section,
-} from '@/components/shell/app-shell';
+import { AppShell, type Section } from '@/components/shell/app-shell';
 import { Card } from '@/components/ui/card';
 import {
   ExpiredBadge,
@@ -24,6 +20,7 @@ import { FolderDrawer } from '@/components/library/folder-drawer';
 import { UploadDialog } from '@/components/library/upload-dialog';
 import { StorageSection } from '@/components/storage/storage-section';
 import { ServerSection } from '@/components/settings/server-section';
+import { ShareLinksPage } from '@/components/share-links/share-links-page';
 import { NewFolderDialog } from '@/components/library/new-folder-dialog';
 import {
   getMe,
@@ -441,7 +438,9 @@ function Dashboard(props: {
         <StorageSection storage={storage} videos={videos} />
       )}
       {section === 'settings' && <ServerSection />}
-      {section === 'share-links' && <SectionPlaceholder title="Share links" />}
+      {section === 'share-links' && (
+        <ShareLinksPage onChanged={() => void refresh()} />
+      )}
     </AppShell>
   );
 }
