@@ -97,9 +97,16 @@ export async function registerUploadRoutes(
     path: '/api/uploads',
     datastore,
     maxSize: maxUploadBytes,
-    // The Operator's own reverse proxy terminates TLS (ADR-0004); honour its
-    // forwarded host/proto so the Upload URLs tus hands back resolve.
-    respectForwardedHeaders: true,
+    // Hand back a relative Upload URL (`/api/uploads/<id>`), not an absolute
+    // one. The client resolves it against the origin the browser is already on,
+    // so the follow-up HEAD/PATCH/DELETE stay same-origin in every deployment —
+    // no cross-origin request, no CORS preflight to satisfy. An absolute URL
+    // would be built from the request Host, which breaks both ends: the Vite
+    // dev proxy rewrites Host to the backend (changeOrigin), so tus would point
+    // the client at :8080 while the page is on :5173; and the Operator's own
+    // reverse proxy terminates TLS (ADR-0004), so the Host/proto tus sees need
+    // not match the public origin. A relative URL sidesteps both.
+    relativeLocation: true,
 
     // Gate a new Upload before any bytes are accepted — the resumable analogue
     // of the legacy route's up-front checks.
