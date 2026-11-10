@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { ChevronLeft, Play } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { ChevronLeft, Pencil, Play } from 'lucide-react';
 
 import {
   clearVideoPassword,
@@ -10,6 +10,8 @@ import {
   setVideoPassword,
   setVideoPortrait,
   setVideoAutoplay,
+  setVideoTitle,
+  setVideoDescription,
   type FolderSummary,
   type VideoSummary,
 } from '../../api';
@@ -66,6 +68,22 @@ export function VideoDrawer(props: {
     openShareLink(video.shareUrl);
   }
 
+  async function onRename(title: string): Promise<boolean> {
+    return run(
+      () => setVideoTitle(video.slug, title),
+      'Title updated',
+      'Could not rename video',
+    );
+  }
+
+  async function onDescribe(description: string | null): Promise<boolean> {
+    return run(
+      () => setVideoDescription(video.slug, description),
+      description === null ? 'Description cleared' : 'Description updated',
+      'Could not update description',
+    );
+  }
+
   async function onMove(value: string): Promise<void> {
     await run(
       () => moveVideoToFolder(video.slug, value === 'root' ? null : value),
@@ -113,7 +131,13 @@ export function VideoDrawer(props: {
           </button>
         )}
 
-        <SheetTitle>{video.title}</SheetTitle>
+        <EditableTitle title={video.title} busy={busy} onSave={onRename} />
+
+        <EditableDescription
+          description={video.description}
+          busy={busy}
+          onSave={onDescribe}
+        />
 
         <div className="relative overflow-hidden rounded-lg border border-border">
           <VideoThumb
@@ -291,5 +315,184 @@ export function VideoDrawer(props: {
         </div>
       </SheetContent>
     </Sheet>
+  );
+}
+
+/**
+ * The title cap enforced by the server (routes.ts TITLE_MAX_LENGTH), mirrored
+ * here so the input stops at the limit instead of letting the operator type a
+ * name the rename will only reject.
+ */
+const TITLE_MAX_LENGTH = 150;
+
+/**
+ * The click-to-edit plumbing shared by the title and the description: a draft
+ * buffer, an open/closed flag, and the blur/Escape handling that makes "Enter
+ * or focus-loss commits, Escape reverts" behave. `commit` is given the current
+ * draft and returns whether the field may close — false keeps it open (a failed
+ * save), true closes it (saved, reverted, or an unchanged no-op).
+ */
+function useInlineEdit(commit: (draft: string) => Promise<boolean>) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  // Escape blurs the control to cancel; without this flag the ensuing blur
+  // would be read as a commit and save the reverted-away text.
+  const escaping = useRef(false);
+
+  function begin(initial: string): void {
+    setDraft(initial);
+    setEditing(true);
+  }
+
+  function onBlur(): void {
+    if (escaping.current) {
+      escaping.current = false;
+      setEditing(false);
+      return;
+    }
+    void commit(draft).then((close) => {
+      if (close) setEditing(false);
+    });
+  }
+
+  /** Call from a keydown to abandon the edit via the blur path. */
+  function cancel(el: HTMLElement): void {
+    escaping.current = true;
+    el.blur();
+  }
+
+  return {
+    editing,
+    draft,
+    setDraft,
+    begin,
+    onBlur,
+    cancel,
+  };
+}
+
+/**
+ * The drawer's in-place title: the Video's name shown as the Sheet heading,
+ * click-to-rename right where it sits. Enter or blur commits, Escape reverts;
+ * an empty (not savable) or unchanged value just closes. Stays a `SheetTitle`
+ * in both modes via `asChild`, so the drawer keeps the single accessible
+ * heading Radix needs to label the dialog.
+ */
+function EditableTitle(props: {
+  title: string;
+  busy: boolean;
+  onSave: (title: string) => Promise<boolean>;
+}) {
+  const edit = useInlineEdit(async (draft) => {
+    const next = draft.trim();
+    // Empty is not savable and unchanged is a no-op: either way, just close and
+    // keep the current title. A real change is saved; the field stays open only
+    // when the save itself fails, so the operator can retry without retyping.
+    if (next.length === 0 || next === props.title) return true;
+    return props.onSave(next);
+  });
+
+  if (edit.editing) {
+    return (
+      <SheetTitle asChild>
+        <input
+          autoFocus
+          value={edit.draft}
+          disabled={props.busy}
+          maxLength={TITLE_MAX_LENGTH}
+          onChange={(e) => edit.setDraft(e.target.value)}
+          onFocus={(e) => e.currentTarget.select()}
+          onBlur={edit.onBlur}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              e.currentTarget.blur();
+            } else if (e.key === 'Escape') {
+              e.preventDefault();
+              edit.cancel(e.currentTarget);
+            }
+          }}
+          // 16px on small screens so iOS Safari doesn't force-zoom on focus.
+          className="mr-8 min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-ring"
+        />
+      </SheetTitle>
+    );
+  }
+
+  return (
+    <SheetTitle asChild>
+      <button
+        type="button"
+        onClick={() => edit.begin(props.title)}
+        title="Rename"
+        className="group -mx-2 flex items-center gap-1.5 rounded-md px-2 py-1 text-left transition-colors hover:bg-accent"
+      >
+        <span className="truncate">{props.title}</span>
+        <Pencil className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+      </button>
+    </SheetTitle>
+  );
+}
+
+/**
+ * The drawer's in-place description, shown just under the title. Unlike the
+ * title a description is optional: a blank value clears it, and a Video with
+ * none shows a muted prompt to add one. A textarea (descriptions run to several
+ * lines), so Enter inserts a newline — Escape reverts and blur commits, same as
+ * the title.
+ */
+function EditableDescription(props: {
+  description: string | null;
+  busy: boolean;
+  onSave: (description: string | null) => Promise<boolean>;
+}) {
+  const edit = useInlineEdit(async (draft) => {
+    const trimmed = draft.trim();
+    const next = trimmed.length > 0 ? trimmed : null;
+    // Unchanged (including blank over an already-empty description) is a no-op.
+    if (next === props.description) return true;
+    return props.onSave(next);
+  });
+
+  if (edit.editing) {
+    return (
+      <textarea
+        autoFocus
+        rows={3}
+        value={edit.draft}
+        disabled={props.busy}
+        onChange={(e) => edit.setDraft(e.target.value)}
+        onBlur={edit.onBlur}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            edit.cancel(e.currentTarget);
+          }
+        }}
+        placeholder="Add a description…"
+        // 16px on small screens so iOS Safari doesn't force-zoom on focus.
+        className="-mt-1 min-w-0 resize-y rounded-md border border-border bg-background px-2 py-1 text-base text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring sm:text-sm"
+      />
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => edit.begin(props.description ?? '')}
+      title="Edit description"
+      className="group -mx-2 -mt-1 flex items-start gap-1.5 rounded-md px-2 py-1 text-left transition-colors hover:bg-accent"
+    >
+      <span
+        className={
+          props.description
+            ? 'whitespace-pre-wrap text-sm text-muted-foreground'
+            : 'text-sm italic text-muted-foreground/60'
+        }
+      >
+        {props.description ?? 'Add a description…'}
+      </span>
+      <Pencil className="mt-0.5 size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+    </button>
   );
 }

@@ -644,6 +644,41 @@ export async function setVideoExpiry(
   return data.video;
 }
 
+/** Renames a Video — sets its title in place. Returns the updated Video. */
+export async function setVideoTitle(
+  slug: string,
+  title: string,
+): Promise<VideoSummary> {
+  const res = await fetch(`/api/videos/${encodeURIComponent(slug)}/title`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ title }),
+  });
+  if (!res.ok) throw await operatorError(res, 'Could not rename video');
+  const data = (await res.json()) as { video: VideoSummary };
+  return data.video;
+}
+
+/**
+ * Sets or clears a Video's description in place. Pass the new text, or null (an
+ * empty string is treated the same) to clear it. Returns the updated Video.
+ */
+export async function setVideoDescription(
+  slug: string,
+  description: string | null,
+): Promise<VideoSummary> {
+  const res = await fetch(`/api/videos/${encodeURIComponent(slug)}/description`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ description }),
+  });
+  if (!res.ok) throw await operatorError(res, 'Could not update description');
+  const data = (await res.json()) as { video: VideoSummary };
+  return data.video;
+}
+
 /** Sets a Video's Portrait-optimized display hint (GLOSSARY). */
 export async function setVideoPortrait(
   slug: string,

@@ -29,6 +29,15 @@ import type { VideoWorker } from './transcode-worker';
  */
 export const UNNAMED_VIDEO = 'Unnamed video';
 
+/**
+ * The longest a Video title may be. A Share Link preview and the Library row
+ * both show the title on one line, so this keeps a rename from producing a name
+ * that can't be read at a glance. Upload accepts any length (a title arrives
+ * with the file and is not re-typed there); the cap applies to the deliberate,
+ * in-place rename.
+ */
+export const TITLE_MAX_LENGTH = 150;
+
 /** Raised by {@link byteCeiling} when an upload outgrows what may be written. */
 class StorageCeilingExceeded extends Error {
   constructor(
@@ -531,6 +540,70 @@ export async function registerVideoRoutes(
       const updated = (await repo.findById(video.id)) ?? video;
       return reply.code(200).send({
         video: serializeVideo(updated, clock.now(), folder ? folder.slug : null),
+      });
+    },
+  );
+
+  // Rename a Video in place (spec: the drawer's inline title edit). A title is
+  // required here: the upload-time "optional → Unnamed video" default is for a
+  // Video born without one, never a deliberate rename — clearing the field is
+  // the Operator's error to see (ADR-0007), not a silent reset to the default.
+  app.post<{ Params: { slug: string }; Body: { title?: unknown } }>(
+    '/api/videos/:slug/title',
+    requireOperator,
+    async (request, reply) => {
+      const video = await repo.findBySlug(request.params.slug);
+      if (!video) return videoNotFound(reply, request.params.slug);
+
+      const title =
+        typeof request.body?.title === 'string' ? request.body.title.trim() : '';
+      if (title.length === 0) {
+        return reply.code(400).send({
+          error: 'missing_title',
+          detail: 'A non-empty title is required to rename a Video.',
+        });
+      }
+      if (title.length > TITLE_MAX_LENGTH) {
+        return reply.code(400).send({
+          error: 'title_too_long',
+          detail: `A title is at most ${TITLE_MAX_LENGTH} characters; this one is ${title.length}.`,
+        });
+      }
+
+      await repo.setTitle(video.id, title);
+      const updated = (await repo.findById(video.id)) ?? video;
+      return reply.code(200).send({
+        video: serializeVideo(updated, clock.now(), await folderSlugOf(updated)),
+      });
+    },
+  );
+
+  // Edit a Video's description in place (the drawer's inline edit). Unlike the
+  // title a description is optional (GLOSSARY: Video): the body carries a string
+  // to set, or null (or an empty/whitespace string, normalized to null) to
+  // clear it — mirroring the upload path, where a blank description is stored as
+  // null rather than an empty string.
+  app.post<{ Params: { slug: string }; Body: { description?: unknown } }>(
+    '/api/videos/:slug/description',
+    requireOperator,
+    async (request, reply) => {
+      const video = await repo.findBySlug(request.params.slug);
+      if (!video) return videoNotFound(reply, request.params.slug);
+
+      const raw = request.body?.description;
+      if (raw !== null && raw !== undefined && typeof raw !== 'string') {
+        return reply.code(400).send({
+          error: 'invalid_description',
+          detail: 'description must be a string, or null to clear it.',
+        });
+      }
+      const trimmed = typeof raw === 'string' ? raw.trim() : '';
+      const description = trimmed.length > 0 ? trimmed : null;
+
+      await repo.setDescription(video.id, description);
+      const updated = (await repo.findById(video.id)) ?? video;
+      return reply.code(200).send({
+        video: serializeVideo(updated, clock.now(), await folderSlugOf(updated)),
       });
     },
   );
