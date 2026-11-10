@@ -811,6 +811,102 @@ export async function registerVideoRoutes(
       }
     },
   );
+
+  // Disable or re-enable a Video's Share Link (GLOSSARY: Disabled, ADR-0014):
+  // a reversible kill switch, separate from expiry. Allowed in any lifecycle
+  // state — a Processing or Failed Video has a link the moment it is born, and
+  // the Operator may switch it off regardless. The body carries `disabled` as a
+  // boolean; disabled → the link returns the generic Viewer 404 (ADR-0002),
+  // re-enabling restores it unchanged.
+  app.post<{ Params: { slug: string }; Body: { disabled?: unknown } }>(
+    '/api/videos/:slug/disabled',
+    requireOperator,
+    async (request, reply) => {
+      const video = await repo.findBySlug(request.params.slug);
+      if (!video) return videoNotFound(reply, request.params.slug);
+
+      if (typeof request.body?.disabled !== 'boolean') {
+        return reply.code(400).send({
+          error: 'invalid_disabled',
+          detail: 'disabled must be a boolean.',
+        });
+      }
+
+      await repo.setDisabled(video.id, request.body.disabled);
+      const updated = await repo.findById(video.id);
+      {
+        const v = updated ?? video;
+        return reply.code(200).send({ video: serializeVideo(v, clock.now(), await folderSlugOf(v)) });
+      }
+    },
+  );
+
+  // Disable or re-enable a Folder's `/f/` gallery Share Link (GLOSSARY:
+  // Disabled, ADR-0014). The body carries `disabled` as a boolean, and an
+  // optional `cascade` (default false): when disabling with `cascade: true`,
+  // every member Video's own `/v/` link is disabled too (the opt-in, disable-
+  // time choice). Re-enabling never cascades — it restores only the gallery
+  // link — so a `cascade: true` sent with `disabled: false` is ignored (a
+  // Folder re-enable can't guess which member links the Operator meant to keep
+  // off). A disabled gallery returns the generic Viewer 404 (ADR-0002).
+  app.post<{ Params: { slug: string }; Body: { disabled?: unknown; cascade?: unknown } }>(
+    '/api/folders/:slug/disabled',
+    requireOperator,
+    async (request, reply) => {
+      const folder = await folderRepo.findBySlug(request.params.slug);
+      if (!folder) return folderNotFound(reply, request.params.slug);
+
+      if (typeof request.body?.disabled !== 'boolean') {
+        return reply.code(400).send({
+          error: 'invalid_disabled',
+          detail: 'disabled must be a boolean.',
+        });
+      }
+      const cascade = request.body?.cascade;
+      if (cascade !== undefined && typeof cascade !== 'boolean') {
+        return reply.code(400).send({
+          error: 'invalid_cascade',
+          detail: 'cascade must be a boolean when present.',
+        });
+      }
+
+      await folderRepo.setDisabled(folder.id, request.body.disabled);
+      // The cascade is a disable-time choice only (ADR-0014): re-enabling
+      // restores the gallery link alone and never touches member Videos.
+      if (request.body.disabled && cascade === true) {
+        await repo.setDisabledByFolder(folder.id, true);
+      }
+      return reply.code(200).send({ folder: await serializeFolderFresh(folder.id) });
+    },
+  );
+
+  // The Share Links overview (GLOSSARY: Share Link): every Video and Folder with
+  // its link state, for the Dashboard's Share Links section. Reuses the same
+  // serializers as the Library so the payloads carry `disabled`, `expired`,
+  // `protected`, lifecycle state, and the owning Folder exactly as elsewhere.
+  app.get('/api/links', requireOperator, async () => {
+    const now = clock.now();
+    const [allVideos, allFolders] = await Promise.all([repo.list(), folderRepo.list()]);
+    const folderSlugById = new Map(allFolders.map((f) => [f.id, f.slug]));
+    const counts = new Map<number, number>();
+    for (const video of allVideos) {
+      if (video.folderId !== null) {
+        counts.set(video.folderId, (counts.get(video.folderId) ?? 0) + 1);
+      }
+    }
+    return {
+      videos: allVideos.map((video) =>
+        serializeVideo(
+          video,
+          now,
+          video.folderId === null ? null : folderSlugById.get(video.folderId) ?? null,
+        ),
+      ),
+      folders: allFolders.map((folder) =>
+        serializeFolder(folder, counts.get(folder.id) ?? 0, now),
+      ),
+    };
+  });
 }
 
 /** The Operator-facing not-found (ADR-0007: the real reason, naming the slug). */
@@ -857,6 +953,8 @@ export interface VideoView {
   expiresAt: number | null;
   /** Whether the link has expired as of now (per the injected Clock). */
   expired: boolean;
+  /** Whether the Operator has disabled the link (GLOSSARY: Disabled, ADR-0014). */
+  disabled: boolean;
   /** The owning Folder's slug, or null when the Video sits in the Library root. */
   folderSlug: string | null;
   /** Operator display hint: crop-to-fill on a portrait screen (GLOSSARY: Portrait-optimized). */
@@ -900,6 +998,7 @@ export function serializeVideo(
     protected: video.passwordHash !== null,
     expiresAt: video.expiresAt,
     expired: isExpired(video, now),
+    disabled: video.disabled,
     folderSlug,
     portraitOptimized: video.portraitOptimized,
     autoplay: video.autoplay,
@@ -930,6 +1029,8 @@ export interface FolderView {
   expiresAt: number | null;
   /** Whether the gallery link has expired as of now (per the injected Clock). */
   expired: boolean;
+  /** Whether the Operator has disabled the gallery link (GLOSSARY: Disabled, ADR-0014). */
+  disabled: boolean;
   /** The Folder's Portrait-optimized default (GLOSSARY), reflected by its drawer toggle. */
   portraitOptimized: boolean;
   /** The Folder's Autoplay default (GLOSSARY), reflected by its drawer toggle. */
@@ -946,6 +1047,7 @@ function serializeFolder(folder: Folder, videoCount: number, now: number): Folde
     protected: folder.passwordHash !== null,
     expiresAt: folder.expiresAt,
     expired: isExpired(folder, now),
+    disabled: folder.disabled,
     portraitOptimized: folder.portraitOptimized,
     autoplay: folder.autoplay,
     shareUrl: `/f/${folder.slug}`,
@@ -959,4 +1061,14 @@ function serializeFolder(folder: Folder, videoCount: number, now: number): Folde
  */
 export function isExpired(link: { expiresAt: number | null }, now: number): boolean {
   return link.expiresAt !== null && now >= link.expiresAt;
+}
+
+/**
+ * Whether the Operator has disabled this Share Link (GLOSSARY: Disabled,
+ * ADR-0014). A reversible kill switch, independent of expiry — the Viewer
+ * surface treats disabled exactly like expired (the generic 404, ADR-0002).
+ * Works for a Video or a Folder alike.
+ */
+export function isDisabled(link: { disabled: boolean }): boolean {
+  return link.disabled;
 }
