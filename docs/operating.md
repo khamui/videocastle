@@ -66,6 +66,52 @@ videos.example.com {
 }
 ```
 
+## Keep videocastle out of search engines
+
+videocastle serves no `robots.txt` and sets no `X-Robots-Tag` header itself —
+blocking crawlers is a proxy-edge concern, like TLS. Share Links are private by
+their unguessable slug, but if one leaks into a crawlable page you want search
+engines to neither index the URL nor cache it. Have your proxy do both:
+
+- send `X-Robots-Tag: noindex, nofollow, noarchive` on **every** response (the
+  header binds even when a slug is linked elsewhere; `noarchive` also drops the
+  cached copy);
+- serve a disallow-all `/robots.txt` for the crawlers that check it first.
+
+With Caddy:
+
+```
+videos.example.com {
+    header X-Robots-Tag "noindex, nofollow, noarchive"
+    handle /robots.txt {
+        respond "User-agent: *\nDisallow: /\n" 200
+    }
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+On nginx, a server-level `add_header` is silently dropped on any proxied
+response once the `location` doing `proxy_pass` defines its own `add_header`
+(nginx replaces, not merges, inherited headers). Use `more_set_headers` from the
+`headers-more` module instead — it is not subject to that inheritance rule and
+is bundled in the OpenResty-based Nginx Proxy Manager image. In NPM's **Advanced
+→ Custom Nginx Configuration**:
+
+```nginx
+more_set_headers "X-Robots-Tag: noindex, nofollow, noarchive";
+
+location = /robots.txt {
+    default_type text/plain;
+    more_set_headers "X-Robots-Tag: noindex, nofollow, noarchive";
+    return 200 "User-agent: *\nDisallow: /\n";
+}
+```
+
+Verify from outside: `curl -sI https://videos.example.com/v/<slug>` shows the
+header, and `curl -s https://videos.example.com/robots.txt` returns the body.
+This blocks the whole host, Dashboard included — the intended posture for a
+private, link-only instance.
+
 ## Reset a forgotten Operator password
 
 There is no email/SMTP recovery. Reset the single Operator credential directly
