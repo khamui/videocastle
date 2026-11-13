@@ -202,6 +202,23 @@ export class VideoRepo {
     await this.db.update(videos).set({ folderId }).where(eq(videos.id, id));
   }
 
+  /**
+   * Renames a Video — persists a new title. The caller owns trimming and the
+   * non-empty check; the repo just stores it.
+   */
+  async setTitle(id: number, title: string): Promise<void> {
+    await this.db.update(videos).set({ title }).where(eq(videos.id, id));
+  }
+
+  /**
+   * Sets or clears a Video's description — a trimmed string, or `null` to clear
+   * it. The caller owns normalizing a blank value to null; the repo just stores
+   * what it is given.
+   */
+  async setDescription(id: number, description: string | null): Promise<void> {
+    await this.db.update(videos).set({ description }).where(eq(videos.id, id));
+  }
+
   /** Sets a Video's Portrait-optimized display hint (GLOSSARY). */
   async setPortraitOptimized(id: number, optimized: boolean): Promise<void> {
     await this.db

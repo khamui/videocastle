@@ -249,6 +249,188 @@ describe('portrait optimization', () => {
   });
 });
 
+describe('renaming a Video', () => {
+  /** Reads one Video's title from the Operator's Library list. */
+  async function titleOf(
+    app: TestApp['app'],
+    jar: Record<string, string>,
+    slug: string,
+  ): Promise<string | undefined> {
+    const list = await app.inject({ method: 'GET', url: '/api/videos', cookies: jar });
+    return (list.json().videos as { slug: string; title: string }[]).find(
+      (v) => v.slug === slug,
+    )?.title;
+  }
+
+  it('changes the title in place and trims surrounding whitespace', async () => {
+    const { app, jar, transcoder } = await signedIn();
+    transcoder.auto = false;
+    const up = await uploadVideo(app, jar, {
+      fields: { title: 'Old name' },
+      file: { fieldname: 'file', filename: 'clip.mp4', content: 'bytes' },
+    });
+    const slug = up.json().video.slug as string;
+
+    const renamed = await app.inject({
+      method: 'POST',
+      url: `/api/videos/${slug}/title`,
+      cookies: jar,
+      payload: { title: '  New name  ' },
+    });
+    expect(renamed.statusCode).toBe(200);
+    expect(renamed.json().video.title).toBe('New name');
+    expect(await titleOf(app, jar, slug)).toBe('New name');
+  });
+
+  it('refuses an empty title rather than silently resetting to the default', async () => {
+    const { app, jar, transcoder } = await signedIn();
+    transcoder.auto = false;
+    const up = await uploadVideo(app, jar, {
+      fields: { title: 'Keep me' },
+      file: { fieldname: 'file', filename: 'clip.mp4', content: 'bytes' },
+    });
+    const slug = up.json().video.slug as string;
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/videos/${slug}/title`,
+      cookies: jar,
+      payload: { title: '   ' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('missing_title');
+    // Unchanged on disk.
+    expect(await titleOf(app, jar, slug)).toBe('Keep me');
+  });
+
+  it('refuses a title over 150 characters', async () => {
+    const { app, jar, transcoder } = await signedIn();
+    transcoder.auto = false;
+    const up = await uploadVideo(app, jar, {
+      fields: { title: 'Short' },
+      file: { fieldname: 'file', filename: 'clip.mp4', content: 'bytes' },
+    });
+    const slug = up.json().video.slug as string;
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/videos/${slug}/title`,
+      cookies: jar,
+      payload: { title: 'x'.repeat(151) },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('title_too_long');
+    expect(await titleOf(app, jar, slug)).toBe('Short');
+
+    // The boundary (exactly 150) is accepted.
+    const ok = await app.inject({
+      method: 'POST',
+      url: `/api/videos/${slug}/title`,
+      cookies: jar,
+      payload: { title: 'y'.repeat(150) },
+    });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json().video.title).toBe('y'.repeat(150));
+  });
+
+  it('404s renaming an unknown slug, naming it (ADR-0007)', async () => {
+    const { app, jar } = await signedIn();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/videos/nope/title',
+      cookies: jar,
+      payload: { title: 'Whatever' },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error).toBe('video_not_found');
+  });
+});
+
+describe('editing a Video description', () => {
+  /** Reads one Video's description from the Operator's Library list. */
+  async function descriptionOf(
+    app: TestApp['app'],
+    jar: Record<string, string>,
+    slug: string,
+  ): Promise<string | null | undefined> {
+    const list = await app.inject({ method: 'GET', url: '/api/videos', cookies: jar });
+    return (
+      list.json().videos as { slug: string; description: string | null }[]
+    ).find((v) => v.slug === slug)?.description;
+  }
+
+  it('sets, trims, and then clears the description', async () => {
+    const { app, jar, transcoder } = await signedIn();
+    transcoder.auto = false;
+    const up = await uploadVideo(app, jar, {
+      fields: { title: 'Clip' },
+      file: { fieldname: 'file', filename: 'clip.mp4', content: 'bytes' },
+    });
+    const slug = up.json().video.slug as string;
+    expect(up.json().video.description).toBeNull();
+
+    const set = await app.inject({
+      method: 'POST',
+      url: `/api/videos/${slug}/description`,
+      cookies: jar,
+      payload: { description: '  A fine clip  ' },
+    });
+    expect(set.statusCode).toBe(200);
+    expect(set.json().video.description).toBe('A fine clip');
+    expect(await descriptionOf(app, jar, slug)).toBe('A fine clip');
+
+    // A blank string clears it back to null (never stored as an empty string).
+    const cleared = await app.inject({
+      method: 'POST',
+      url: `/api/videos/${slug}/description`,
+      cookies: jar,
+      payload: { description: '   ' },
+    });
+    expect(cleared.statusCode).toBe(200);
+    expect(cleared.json().video.description).toBeNull();
+    expect(await descriptionOf(app, jar, slug)).toBeNull();
+  });
+
+  it('clears the description when passed null', async () => {
+    const { app, jar, transcoder } = await signedIn();
+    transcoder.auto = false;
+    const up = await uploadVideo(app, jar, {
+      fields: { title: 'Clip', description: 'Has one' },
+      file: { fieldname: 'file', filename: 'clip.mp4', content: 'bytes' },
+    });
+    const slug = up.json().video.slug as string;
+    expect(up.json().video.description).toBe('Has one');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/videos/${slug}/description`,
+      cookies: jar,
+      payload: { description: null },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().video.description).toBeNull();
+  });
+
+  it('rejects a non-string, non-null description', async () => {
+    const { app, jar, transcoder } = await signedIn();
+    transcoder.auto = false;
+    const up = await uploadVideo(app, jar, {
+      fields: { title: 'Clip' },
+      file: { fieldname: 'file', filename: 'clip.mp4', content: 'bytes' },
+    });
+    const slug = up.json().video.slug as string;
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/videos/${slug}/description`,
+      cookies: jar,
+      payload: { description: 42 },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('invalid_description');
+  });
+});
+
 describe('autoplay', () => {
   /** Finds one Video in the Operator's Library list by slug. */
   async function findVideo(
